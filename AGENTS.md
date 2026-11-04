@@ -14,7 +14,7 @@ If the owner explicitly requests primary-author attribution for work genuinely w
 
 ## Validation
 
-Run `python -m unittest discover -s tests -p test_hive_virtual.py` for control/configuration changes and `node --check custom_components/hive_virtual/frontend/panel.js` for frontend changes. Documentation-only edits do not require rerunning simulated heating tests. Keep HACS and hassfest checks enabled. Physical Hive validation must not be inferred from simulated services.
+Run `python -m unittest discover -s tests -p 'test_*.py'` for control/configuration changes and both `node --check custom_components/hive_virtual/frontend/panel.js` and `node --test tests/test_frontend.mjs` for frontend changes. Exercise browser-smoke.html and the real-runtime script when changing page settings or Home Assistant APIs. Documentation-only edits do not require rerunning simulated heating tests. Keep HACS and hassfest checks enabled. Physical Hive validation must not be inferred from simulated services.
 
 ## Publication
 

@@ -13,13 +13,13 @@ async def async_setup_panel(hass):
     path = "hive-virtual-heating"
     if not data.get("static_registered"):
         await hass.http.async_register_static_paths([StaticPathConfig(
-            "/hive_virtual/panel.js", str(Path(__file__).parent / "frontend" / "panel.js"), False),
+            "/hive_virtual/frontend", str(Path(__file__).parent / "frontend"), False),
             StaticPathConfig("/hive_virtual/brand", str(Path(__file__).parent / "brand"), True)])
         data["static_registered"] = True
     await panel_custom.async_register_panel(hass,
         webcomponent_name="hive-virtual-panel", frontend_url_path=path,
         sidebar_title="Hive Heating", sidebar_icon="mdi:radiator",
-        module_url="/hive_virtual/panel.js?v=0.4.0", require_admin=False)
+        module_url="/hive_virtual/frontend/panel.js?v=0.5.0", require_admin=False)
     data["registered"] = True
 
 

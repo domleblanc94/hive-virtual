@@ -1,0 +1,62 @@
+<!doctype html><meta charset="utf-8"><title>Hive Heating browser smoke test</title>
+<style>body{margin:0;--primary-background-color:#f4f7f8;--card-background-color:#fff;--primary-text-color:#23313a;--divider-color:#dce3e7;--primary-color:#007f85;--error-color:#ae321b;--app-header-background-color:#006d75;--app-header-text-color:#fff;font-family:Arial}#result{padding:12px;white-space:pre-wrap}</style>
+<hive-virtual-panel></hive-virtual-panel><pre id="result">Running browser tests…</pre>
+<script type="module">
+import '../custom_components/hive_virtual/frontend/panel.js';
+const result=document.querySelector('#result'),panel=document.querySelector('hive-virtual-panel');
+const assert=(v,message)=>{if(!v)throw Error(message);},pause=()=>new Promise(r=>setTimeout(r,30));
+const schedule=[{time:'06:30',temperature:20,area:'Downstairs',days:[0,1,2,3,4,5,6]},{time:'22:00',temperature:18,area:'Upstairs',days:[0,1,2,3,4,5,6]}];
+let native=false,revision='1';const saves=[],nativeSaves=[];
+const helper={id:'demo_helper',name:'Demo heating',monday:[{from:'22:00:00',to:'24:00:00',data:{temperature:18,area:'Upstairs',extra:'preserved'}}]};
+const state={entity_id:'climate.demo_heating',state:'auto',attributes:{hive_virtual_controller:true,controller_unique_id:'demo',friendly_name:'House virtual heating',current_temperature:19.6,temperature:20,active_area:'Downstairs',control_status:'waiting_for_boost_expiry',schedule,daily_heating_hours:2.5,currency:'GBP',cost_estimates:{heating_cost:2.25,household_gas_kwh:36.4,household_variable_cost:2.73,standing_charge:.31}}};
+const linked=(id,role,area)=>({entity_id:id,state:'20',attributes:{controller_unique_id:'demo',heating_role:role,area}});
+const hass={user:{is_admin:true},states:{[state.entity_id]:state,
+ 'binary_sensor.demo_activity':linked('binary_sensor.demo_activity','activity'),
+ 'sensor.demo_down':linked('sensor.demo_down','area_temperature','Downstairs'),
+ 'sensor.demo_up':linked('sensor.demo_up','area_temperature','Upstairs'),
+ 'sensor.gas_daily':{entity_id:'sensor.gas_daily',state:'36.4',attributes:{friendly_name:'Gas today',unit_of_measurement:'kWh'}},
+ 'sensor.gas_rate':{entity_id:'sensor.gas_rate',state:'7.5',attributes:{friendly_name:'Gas unit rate',unit_of_measurement:'p/kWh'}}},
+ callService:async()=>{},
+ callApi:async()=>{
+  const now=Date.now(),t=h=>new Date(now-h*3600000).toISOString();
+  return [
+   [{entity_id:'binary_sensor.demo_activity',state:'off',last_changed:t(24)},{state:'on',last_changed:t(20)},{state:'off',last_changed:t(17)},{state:'on',last_changed:t(8)},{state:'off',last_changed:t(5)}],
+   [{entity_id:'sensor.demo_down',state:'18',last_changed:t(24)},{state:'20.5',last_changed:t(17)},{state:'18.8',last_changed:t(8)},{state:'20.2',last_changed:t(.1)}],
+   [{entity_id:'sensor.demo_up',state:'19',last_changed:t(24)},{state:'20',last_changed:t(17)},{state:'19.2',last_changed:t(8)},{state:'19.7',last_changed:t(.1)}]];
+ },
+ callWS:async msg=>{
+  if(msg.type==='hive_virtual/config')return {revision,schedule:structuredClone(schedule),areas:['Downstairs','Upstairs'],cost:{currency:'GBP',boiler_input_kw:12,rate_in_pence:true},schedule_entity:native?'schedule.demo_helper':null};
+  if(msg.type==='hive_virtual/save'){saves.push(msg);revision=String(Number(revision)+1);return{saved:true};}
+  if(msg.type==='config/entity_registry/get')return{unique_id:'demo_helper'};
+  if(msg.type==='schedule/list')return[structuredClone(helper)];
+  if(msg.type==='schedule/update'){nativeSaves.push(msg);return msg;}
+  throw Error('Unexpected command '+msg.type);
+ }};
+const button=(parent,label)=>[...parent.querySelectorAll('button')].find(b=>b.textContent===label);
+try{
+ panel.hass=hass;panel.shadowRoot.querySelector('header img').src=new URL('../custom_components/hive_virtual/brand/icon.png',import.meta.url).href;
+ await pause();
+ assert(panel.shadowRoot.querySelector('.activity svg'),'Activity timeline failed to render');
+ assert(panel.shadowRoot.querySelector('.temperatures svg'),'Temperature graph failed to render');
+ button(panel.shadowRoot,'Edit schedule').click();await pause();
+ let editor=panel.shadowRoot.querySelector('.editor');
+ assert(editor.querySelectorAll('.schedule-row').length===2,'Built-in periods missing');
+ editor.querySelector('input[type=number]').value='21';button(editor,'Save schedule').click();await pause();
+ assert(saves.at(-1).schedule[0].temperature===21,'Edited schedule target not saved');
+ button(panel.shadowRoot,'Configure costs').click();await pause();editor=panel.shadowRoot.querySelector('.editor');
+ editor.querySelectorAll('select')[0].value='sensor.gas_daily';editor.querySelectorAll('select')[2].value='sensor.gas_rate';
+ button(editor,'Save cost settings').click();await pause();
+ assert(saves.at(-1).cost.unit_rate_entity==='sensor.gas_rate','Tariff sensor not saved');
+ assert(saves.at(-1).cost.gas_energy_today_entity==='sensor.gas_daily','Usage sensor not saved');
+ assert(saves.at(-1).cost.rate_in_pence===true,'Tariff units not retained');
+ native=true;button(panel.shadowRoot,'Edit schedule').click();await pause();editor=panel.shadowRoot.querySelector('.editor');
+ assert(editor.querySelector('.schedule-row'),'Native blocks missing');button(editor,'Save schedule').click();await pause();
+ assert(nativeSaves[0].monday[0].to==='24:00:00','Native midnight end lost');
+ assert(nativeSaves[0].monday[0].data.extra==='preserved','Other native block data was lost');
+ button(editor,'Close editor').click();hass.user.is_admin=false;panel.hass=hass;
+ assert(button(panel.shadowRoot,'Edit schedule').disabled,'Non-admin editor button not disabled');
+ hass.user.is_admin=true;panel.hass=hass;
+ result.textContent='PASS: graphs, built-in schedule edit, native helper edit, cost sensor save, midnight boundary, extra-data preservation and admin controls';
+ document.title='PASS — Hive Heating browser smoke test';
+}catch(e){result.textContent='FAIL: '+e.stack;document.title='FAIL — Hive Heating browser smoke test';}
+</script>

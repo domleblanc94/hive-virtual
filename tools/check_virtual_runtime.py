@@ -1,6 +1,7 @@
 """Isolated real-Home-Assistant smoke test; no Hive credentials or real heating."""
 import asyncio
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
@@ -8,6 +9,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.const import __version__
 from homeassistant import loader, bootstrap
 from homeassistant.components.frontend import DATA_PANELS
+from homeassistant.exceptions import Unauthorized
 
 
 async def main():
@@ -76,10 +78,80 @@ async def main():
         hass.states.async_set('schedule.heating_trial', 'off')
         await controller._reconcile()
         assert not controller._demand
+        # Exercise the registered WebSocket handlers with real HA schemas and
+        # decorators. Only the connection transport and physical Hive are fake.
+        async def call_ws(kind, payload=None, admin=True):
+            result, event = {}, asyncio.Event()
+            def send_result(ident, value=None):
+                result['value'] = value
+                event.set()
+            def send_error(ident, code, message):
+                result['error'] = code
+                result['message'] = message
+                event.set()
+            def unexpected(msg, err):
+                result['exception'] = repr(err)
+                event.set()
+            connection = SimpleNamespace(user=SimpleNamespace(is_admin=admin), send_result=send_result,
+                                         send_error=send_error, async_handle_exception=unexpected)
+            handler, schema = hass.data['websocket_api'][kind]
+            handler(hass, connection, schema({'id': 100, 'type': kind, **(payload or {})}))
+            await asyncio.wait_for(event.wait(), 10)
+            assert 'exception' not in result, result
+            return result
+        try:
+            await call_ws('hive_virtual/config', {'entity_id': controller.entity_id}, admin=False)
+            raise AssertionError('Non-admin settings read was accepted')
+        except Unauthorized:
+            pass
+        page = (await call_ws('hive_virtual/config', {'entity_id': controller.entity_id}))['value']
+        conflict = await call_ws('hive_virtual/save', {'entity_id': controller.entity_id, 'revision': 'old', 'cost': {}})
+        assert conflict['error'] == 'conflict'
+        hass.states.async_set('sensor.gas_daily_trial', '30', {'unit_of_measurement': 'kWh'})
+        hass.states.async_set('sensor.gas_rate_trial', '7.5', {'unit_of_measurement': 'p/kWh'})
+        hass.states.async_set('sensor.gas_cost_trial', '2.75', {'unit_of_measurement': 'GBP'})
+        costs = {'gas_energy_today_entity': 'sensor.gas_daily_trial', 'gas_cost_today_entity': 'sensor.gas_cost_trial',
+                 'unit_rate_entity': 'sensor.gas_rate_trial', 'rate_in_pence': True, 'boiler_input_kw': 12}
+        saved = await call_ws('hive_virtual/save', {'entity_id': controller.entity_id, 'revision': page['revision'], 'cost': costs})
+        assert saved.get('value', {}).get('saved'), saved
+        await hass.async_block_till_done()
+        controller._runtime.seconds = 3600
+        assert abs(controller.cost_estimates()['heating_cost'] - .9) < .01
+        assert controller.cost_estimates()['household_variable_cost'] == 2.75
+        assert controller.cost_estimates()['household_gas_kwh'] == 30
+        await controller._reconcile()
+        assert len([s for s in hass.states.async_all('sensor') if s.attributes.get('heating_role') == 'area_temperature']) == 2
+        assert await async_setup_component(hass, 'schedule', {})
+        helper = (await call_ws('schedule/create', {'name': 'Runtime editable schedule'}))['value']
+        payload = {'schedule_id': helper['id'], 'name': helper['name'],
+                   'monday': [{'from': '22:00:00', 'to': '24:00:00', 'data': {'temperature': 18, 'area': 'Upstairs', 'custom': 'retained'}}]}
+        native_saved = await call_ws('schedule/update', payload)
+        assert 'error' not in native_saved, native_saved
+        native_items = (await call_ws('schedule/list'))['value']
+        assert next(i for i in native_items if i['id'] == helper['id'])['monday'][0]['data']['custom'] == 'retained'
+        assert controller.hvac_mode == 'auto'
+        assert controller._pending_until == deadline
+        config = {**entry.data, **entry.options}
+        config.pop('schedule_entity', None)
+        hass.config_entries.async_update_entry(entry, options=config)
+        await hass.async_block_till_done()
+        page = (await call_ws('hive_virtual/config', {'entity_id': controller.entity_id}))['value']
+        invalid = await call_ws('hive_virtual/save', {'entity_id': controller.entity_id, 'revision': page['revision'],
+                                                    'schedule': [{'time': '99:00', 'temperature': 20, 'area': 'Upstairs'}]})
+        assert invalid['error'] == 'invalid_settings'
+        periods = [{'time': '00:00', 'temperature': 19, 'area': 'Upstairs', 'days': list(range(7))}]
+        builtin_saved = await call_ws('hive_virtual/save', {'entity_id': controller.entity_id, 'revision': page['revision'], 'schedule': periods})
+        assert builtin_saved.get('value', {}).get('saved'), builtin_saved
+        await hass.async_block_till_done()
+        assert controller.config['schedule'][0]['temperature'] == 19
+        assert controller.hvac_mode == 'auto'
+        assert controller._pending_until == deadline
         print(json.dumps({'home_assistant': __version__, 'entry': str(entry.state), 'controller': controller.entity_id,
                           'boost_requests': len(calls), 'live_options': True, 'fault_sensor': True,
                           'durable_request': bool((await controller._store.async_load())['pending_until']),
-                          'native_schedule_options': True, 'fault_survived_reload': True, 'sidebar': True}))
+                          'native_schedule_options': True, 'fault_survived_reload': True, 'sidebar': True,
+                          'page_settings_permissions': True, 'native_schedule_save': True, 'cost_units': True,
+                          'temperature_sensors': True, 'edit_conflict_detection': True, 'builtin_schedule_save': True}))
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await hass.async_stop()

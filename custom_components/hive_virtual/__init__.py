@@ -3,7 +3,7 @@
 from homeassistant.helpers import config_validation as cv
 
 DOMAIN = "hive_virtual"
-PLATFORMS = ["climate", "binary_sensor", "button"]
+PLATFORMS = ["climate", "binary_sensor", "button", "sensor"]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
@@ -21,6 +21,8 @@ async def async_setup(hass, config):
 
     hass.services.async_register(DOMAIN, "reset_fault", reset_fault,
                                 schema=vol.Schema({vol.Required("entity_id"): cv.entity_id}))
+    from .websocket import async_setup as async_setup_websocket
+    async_setup_websocket(hass)
     return True
 
 

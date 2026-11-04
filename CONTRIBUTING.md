@@ -3,11 +3,14 @@
 Use Python 3.13+ and install requirements-dev.txt. Run:
 
 ```text
-python -m unittest discover -s tests -p test_hive_virtual.py
+python -m unittest discover -s tests -p 'test_*.py'
 node --check custom_components/hive_virtual/frontend/panel.js
+node --test tests/test_frontend.mjs
 ```
 
 The offline suite uses Home Assistant stubs. It does not replace the isolated runtime test in tools/check_virtual_runtime.py or physical acceptance tests.
+
+`tests/browser-smoke.html` exercises page editing and chart rendering in a browser using synthetic states and simulated Home Assistant API calls. Open it through a local development server or an isolated headless browser that permits local module imports. Its readings are demonstration data. The real-runtime script additionally exercises actual Home Assistant command schemas, administrator checks, schedule updates and cost units without real Hive credentials.
 
 The implementation, documentation and tests were created with OpenAI Codex; the logo was generated with OpenAI image generation. Review heating-control behaviour before merging. Do not commit credentials, private configurations, device/account identifiers, raw logs or tokens. Use sanitized issue reports.
 

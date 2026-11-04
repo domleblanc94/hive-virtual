@@ -1,4 +1,16 @@
-# 0.4.0 validation — 4 November 2026
+# Validation — 4 November 2026
+
+## 0.5.0
+
+- 51 Python tests passed: existing control/configuration safeguards plus energy units, tariff scaling, unknown inputs, standing-charge/daily-cost separation, runtime midnight/reset handling, graceful runtime flush and stale-report exclusion.
+- Two Node tests passed for history interval handling and preservation of native schedule metadata/midnight blocks.
+- Headless Chrome browser smoke test passed: activity/temperature graphs render, built-in periods save, native helper blocks save, cost source selections save, midnight and unrelated native data are preserved, and non-admin editor controls are disabled.
+- Real Home Assistant 2026.10.4 isolated runtime passed with simulated Hive actions: all platforms load, sensors exist, admin restrictions work, stale integration revisions are rejected, native schedule/update accepts the page's block format, built-in schedule save validates and applies, and a 7.5 p/kWh tariff is converted to 0.075 GBP/kWh. One observed heating hour at 12 kW gas input gives 0.90 GBP estimated heating cost. A selected daily cost of 2.75 GBP remains 2.75 GBP; it is not added to another usage calculation.
+- Existing mode and request deadline remain intact after page edits. Published GitHub checks include HACS and hassfest; see the release's actual Actions run for its result.
+
+The browser/API fixtures use simulated data. No physical Hive, real gas meter or supplier tariff integration was connected. Histories depend on Recorder retention; runtime gaps are deliberately not filled. Cost attribution and fixed-power/current-tariff assumptions are documented in README.md.
+
+## 0.4.0
 
 ## Passed
 

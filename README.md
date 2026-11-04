@@ -26,6 +26,29 @@ Already installed manually? Follow the [settings-preserving HACS migration guide
 
 ## Operation and manual installation
 
+## New in 0.5.0: edit and monitor from Hive Heating
+
+After updating through HACS, restart Home Assistant and refresh the browser. Select **Auto** again when ready (a full restart still starts Off). Existing settings, schedules, faults and pending request deadlines are retained.
+
+- **Edit schedule:** change built-in weekly periods directly on the heating page. If you use a native Schedule helper, the same button edits that helper's blocks, including start/end, target, area and days. Native YAML-defined helpers remain read-only here. Other custom block data is preserved. Invalid periods/overlaps are rejected; stale editor revisions are rejected for integration settings, with a best-effort change check for native helpers.
+- **Heating history:** an on/off/unavailable timeline based on Hive's reported heating action, including manual boosts. It is not inferred from the virtual thermostat's requested demand. Missing or stale Hive reports remain unavailable.
+- **Temperature history:** upstairs/downstairs averages and the virtual target, with 24-hour, 48-hour and 7-day ranges. Recorder/History must be enabled and retain the relevant entities. New sensors begin collecting after this upgrade; the page does not invent earlier data or fill unavailable gaps. The graph uses browser-local time labels; schedule evaluation uses Home Assistant's timezone.
+- **Configure costs:** select daily gas usage, an optional existing daily cost sensor, unit-rate and standing-charge sensors from the page. These settings require an administrator, as does schedule editing. Ordinary thermostat controls retain Home Assistant's normal service permissions.
+
+### Cost inputs and their limits
+
+Use a **daily** usage sensor, such as your gas provider's gas consumption today, rather than a lifetime total. Supported energy units are kWh, Wh and MWh. For m³, explicitly supply your supplier/meter's kWh-per-m³ conversion factor; the integration does not assume one. Other units are unsupported. A sensor marked unavailable or a nonnumeric value produces an unknown estimate, not zero.
+
+Select whether the tariff is in major currency per kWh (for example GBP/kWh) or pence/cents per kWh (divide by 100). A second checkbox applies independently to the daily-cost and standing-charge sensors. These are explicit input settings, not automatic currency conversion. Configure the matching three-letter currency code.
+
+**Heating-only estimate = recorded reported heating hours × configured average gas INPUT power in kW × current unit rate.** Use an appropriate average input power for your boiler while heating; nameplate maximum output is not the same thing. Modulation, sensor latency and unobserved intervals make this an estimate, not a meter reading. It is disabled until a positive input-power value and valid tariff are configured. The current rate reprices the day's estimate; historical tariff changes are not integrated.
+
+Whole-house gas cost is either the selected daily cost sensor, exactly as reported, or daily energy × current rate. It can include hot water/cooking. A daily cost sensor may already include standing charges, so the standing charge is always shown separately and is never automatically added. The heating-only estimate and household spend must not be added together.
+
+Heating hours use only observed, fresh Hive heating reports. Unknown gaps and intervals longer than two minutes are omitted. Daily counters reset at Home Assistant's local midnight, persist across restarts, and can lose up to five minutes on an abrupt host failure. They are approximate monitoring data, not billing or certified metering. Money/daily-estimate sensors are recorded for history but are not advertised as Energy Dashboard cumulative meters.
+
+The previous failed validation email concerned the initial missing HTTP dependency declaration; it was corrected before the first release. HACS, unit tests and Home Assistant packaging validation run on every push and release.
+
 A community Home Assistant integration that controls one Hive heating zone from upstairs/downstairs room temperatures. It uses your existing official Hive integration and does not require another Hive login. It is independent of the Hive EV project.
 
 ## What changed

@@ -227,6 +227,15 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.entity.async_turn_on()
         self.call.assert_not_called()
 
+    async def test_stale_heating_report_does_not_accumulate_runtime(self):
+        self.states["climate.hive"].attributes["hvac_action"] = "heating"
+        self.states["climate.hive"].last_reported -= timedelta(minutes=3)
+        self.entity._runtime.on = True
+        self.entity._runtime.last = datetime.now(timezone.utc).timestamp() - 30
+        await self.entity._reconcile()
+        self.assertIsNone(self.entity._runtime.on)
+        self.assertEqual(self.entity._runtime.seconds, 0)
+
     async def test_stale_sensor_and_bad_area_stop_heat(self):
         self.states["climate.hive"].attributes["temperature"] = 32
         self.states["sensor.down"].last_reported -= timedelta(hours=3)
@@ -383,6 +392,15 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.call.assert_not_called()
         self.assertTrue(self.entity._storage_fault)
 
+    async def test_graceful_shutdown_can_flush_runtime_inside_save_interval(self):
+        self.entity._store = MemoryStore(self.entity.hass, 1, "runtime_flush_test")
+        await self.entity._persist()
+        self.entity._runtime.seconds = 90
+        await self.entity._persist()
+        self.assertEqual((await self.entity._store.async_load())["runtime"]["seconds"], 0)
+        await self.entity._persist(force=True)
+        self.assertEqual((await self.entity._store.async_load())["runtime"]["seconds"], 90)
+
     async def test_native_schedule_selects_area_and_gaps_stop_demand(self):
         self.entity.config["schedule_entity"] = "schedule.heating"
         self.states["schedule.heating"] = state("on", temperature=23, area="Upstairs")
@@ -533,13 +551,13 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         panel = module(async_setup_panel=AsyncMock(), async_remove_panel=Mock())
         with patch.dict(sys.modules, {"virtual_entry_lifecycle": lifecycle, "virtual_entry_lifecycle.climate": climate, "virtual_entry_lifecycle.panel": panel}):
             self.assertTrue(await lifecycle.async_setup_entry(hass, entry))
-            manager.async_forward_entry_setups.assert_awaited_once_with(entry, ["climate", "binary_sensor", "button"])
+            manager.async_forward_entry_setups.assert_awaited_once_with(entry, ["climate", "binary_sensor", "button", "sensor"])
             entry.runtime_data.async_update_config = AsyncMock()
             await registered[0](hass, entry)
             entry.runtime_data.async_update_config.assert_awaited_once()
             manager.async_reload.assert_not_called()
             self.assertTrue(await lifecycle.async_unload_entry(hass, entry))
-            manager.async_unload_platforms.assert_awaited_once_with(entry, ["climate", "binary_sensor", "button"])
+            manager.async_unload_platforms.assert_awaited_once_with(entry, ["climate", "binary_sensor", "button", "sensor"])
             panel.async_remove_panel.assert_called_once()
 
     async def test_climate_entry_applies_saved_options(self):

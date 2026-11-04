@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .control import SensorGuard, average, demand, schedule_slot
+from .estimates import DailyRuntime, energy_kwh, estimate, number, price
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = vol.Schema({
@@ -32,6 +33,17 @@ CONFIG_SCHEMA = vol.Schema({
     vol.Optional("sensor_report_entities", default={}): {cv.entity_id: cv.entity_id},
     vol.Optional("notifications", default=True): cv.boolean,
     vol.Optional("cooldown_minutes", default=2): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
+    vol.Optional("cost", default={}): vol.Schema({
+        vol.Optional("gas_energy_today_entity"): cv.entity_id,
+        vol.Optional("gas_cost_today_entity"): cv.entity_id,
+        vol.Optional("unit_rate_entity"): cv.entity_id,
+        vol.Optional("standing_charge_entity"): cv.entity_id,
+        vol.Optional("currency", default="GBP"): vol.Match(r"^[A-Z]{3}$"),
+        vol.Optional("rate_in_pence", default=False): cv.boolean,
+        vol.Optional("cost_in_pence", default=False): cv.boolean,
+        vol.Optional("boiler_input_kw", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+        vol.Optional("gas_kwh_per_m3", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=20)),
+    }),
     vol.Optional("target_temperature", default=20): vol.All(vol.Coerce(float), vol.Range(min=7, max=30)),
     vol.Optional("call_temperature", default=32): vol.All(vol.Coerce(float), vol.Range(min=7, max=32)),
     vol.Optional("idle_temperature", default=7): vol.All(vol.Coerce(float), vol.Range(min=7, max=10)),
@@ -135,9 +147,40 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self._notice = None
         self._tasks = set()
         self._was_boosting = False
+        self._runtime = DailyRuntime()
         self.config.setdefault("notifications", True)
         self.config.setdefault("cooldown_minutes", 2)
         self.config.setdefault("sensor_report_entities", {})
+        self.config.setdefault("cost", {"currency": "GBP", "rate_in_pence": False, "cost_in_pence": False,
+                                      "boiler_input_kw": 0, "gas_kwh_per_m3": 0})
+
+    def area_temperature(self, area):
+        values = []
+        for entity in self.config["areas"][area]:
+            state = self.hass.states.get(entity)
+            if not state or (dt_util.utcnow() - state.last_reported).total_seconds() > self.config["sensor_timeout"] * 60:
+                return None
+            value = average([state.state])
+            unit = state.attributes.get("unit_of_measurement")
+            if value is None or unit not in ("°C", "°F"):
+                return None
+            value = TemperatureConverter.convert(value, unit, UnitOfTemperature.CELSIUS)
+            if not self.config["sensor_min"] <= value <= self.config["sensor_max"]:
+                return None
+            values.append(value)
+        return average(values)
+
+    def cost_estimates(self):
+        config = self.config["cost"]
+        def source(key):
+            return self.hass.states.get(config.get(key, ""))
+        gas, cost, rate, standing = (source(key) for key in (
+            "gas_energy_today_entity", "gas_cost_today_entity", "unit_rate_entity", "standing_charge_entity"))
+        return estimate(self._runtime.seconds / 3600, config["boiler_input_kw"],
+            price(rate.state, config["rate_in_pence"]) if rate else None,
+            energy_kwh(gas.state, gas.attributes.get("unit_of_measurement"), config["gas_kwh_per_m3"]) if gas else None,
+            price(cost.state, config["cost_in_pence"]) if cost else None,
+            price(standing.state, config["cost_in_pence"]) if standing else None)
 
     @property
     def device_info(self):
@@ -158,10 +201,11 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
 
     def _safety_data(self):
         return {"fault": self._latched_fault,
+                "runtime": self._runtime.saved(),
                 "pending_until": self._pending_until.isoformat() if self._pending_until else None,
                 "accepted": {key: [value, when.isoformat()] for key, (value, when) in self._guard.accepted.items()}}
 
-    async def _persist(self):
+    async def _persist(self, force=False):
         if self._storage_fault:
             return False
         if self._store is None:
@@ -171,7 +215,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             return True
         # Faults and request reservations are immediate. Sample unchanged
         # temperature history at most every five minutes to limit disk writes.
-        if self._saved and self._last_saved_at and (dt_util.utcnow() - self._last_saved_at).total_seconds() < 300:
+        if not force and self._saved and self._last_saved_at and (dt_util.utcnow() - self._last_saved_at).total_seconds() < 300:
             if data["fault"] == self._saved["fault"] and data["pending_until"] == self._saved["pending_until"]:
                 return True
         try:
@@ -194,6 +238,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             if entity := self.config.get(key):
                 watched.add(entity)
         watched.update(self.config["sensor_report_entities"].values())
+        watched.update(value for key, value in self.config["cost"].items() if key.endswith("_entity"))
         self._unwatch = async_track_state_change_event(self.hass, watched, self._changed)
 
     async def async_update_config(self, config):
@@ -223,6 +268,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self._store = Store(self.hass, 1, "hive_virtual_" + key)
         try:
             saved = await self._store.async_load() or {}
+            self._runtime = DailyRuntime(saved.get("runtime"))
             self._latched_fault = saved.get("fault")
             if saved.get("pending_until"):
                 self._pending_until = dt_util.parse_datetime(saved["pending_until"])
@@ -257,7 +303,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
-        await self._persist()
+        await self._persist(force=True)
         await super().async_will_remove_from_hass()
 
     @callback
@@ -358,6 +404,12 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 self._pending_until = max(self._pending_until or deadline, deadline)
             if hive and hive.state not in ("unknown", "unavailable"):
                 self._was_boosting = boosting
+            fresh = hive and 0 <= (dt_util.utcnow() - hive.last_reported).total_seconds() <= 120
+            action = hive.attributes.get("hvac_action") if fresh and hive.state not in ("unknown", "unavailable") else None
+            on = True if action == "heating" else False if action in ("idle", "off") else None
+            now, local = dt_util.utcnow(), dt_util.now()
+            self._runtime.update(now.timestamp(), local.date().isoformat(),
+                                 local.hour * 3600 + local.minute * 60 + local.second, on)
             if hive is None or hive.state in ("unknown", "unavailable"):
                 self._status = "hive_unavailable"
             elif self._boosting():
@@ -467,6 +519,10 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 "boost_minutes": self.config["boost_minutes"],
                 "fault_reason": self.fault_message, "schedule_entity": self.config.get("schedule_entity"),
                 "cooldown_minutes": self.config["cooldown_minutes"],
+                "temperature_areas": list(self.config["areas"]),
+                "daily_heating_hours": round(self._runtime.seconds / 3600, 4),
+                "cost_estimates": self.cost_estimates(), "currency": self.config["cost"]["currency"],
+                "cost_sources": self.config["cost"],
                 "retry_after": self._pending_until.isoformat() if self._pending_until else None}
 
     async def async_set_temperature(self, **kwargs):
