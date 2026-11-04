@@ -74,7 +74,7 @@ stubs = {
     "homeassistant.const": module(ATTR_TEMPERATURE="temperature", UnitOfTemperature=SimpleNamespace(CELSIUS="°C")),
     "homeassistant.core": module(callback=lambda f: f),
     "homeassistant.helpers": module(),
-    "homeassistant.helpers.config_validation": module(string=str, entity_id=str, boolean=bool, ensure_list=lambda v: v if isinstance(v, list) else [v]),
+    "homeassistant.helpers.config_validation": module(string=str, entity_id=str, boolean=bool, ensure_list=lambda v: v if isinstance(v, list) else [v], empty_config_schema=lambda domain: vol.Schema({vol.Optional(domain): {}}, extra=vol.ALLOW_EXTRA)),
     "homeassistant.helpers.event": module(async_track_state_change_event=lambda *a: lambda: None, async_track_time_interval=lambda *a: lambda: None),
     "homeassistant.helpers.restore_state": module(RestoreEntity=Restore),
     "homeassistant.helpers.storage": module(Store=MemoryStore),
@@ -523,7 +523,8 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         import importlib.util
         spec = importlib.util.spec_from_file_location("virtual_entry_lifecycle", Path(package.__path__[0]) / "__init__.py")
         lifecycle = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(lifecycle)
+        with patch.dict(sys.modules, flow_stubs):
+            spec.loader.exec_module(lifecycle)
         manager = SimpleNamespace(async_forward_entry_setups=AsyncMock(), async_reload=AsyncMock(), async_unload_platforms=AsyncMock(return_value=True))
         hass = SimpleNamespace(config_entries=manager, data={})
         registered = []

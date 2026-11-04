@@ -3,6 +3,7 @@
   "name": "Hive Virtual Thermostat",
   "after_dependencies": [
     "frontend",
+    "http",
     "panel_custom",
     "persistent_notification"
   ],

@@ -1,7 +1,10 @@
 """Virtual room-temperature control layered over the official Hive integration."""
 
+from homeassistant.helpers import config_validation as cv
+
 DOMAIN = "hive_virtual"
 PLATFORMS = ["climate", "binary_sensor", "button"]
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
 async def async_setup(hass, config):
