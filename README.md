@@ -20,6 +20,8 @@ For an existing manual installation, back up Home Assistant first, then let HACS
 
 This is a HACS **custom repository**, not a claim of inclusion in the default HACS catalogue.
 
+Already installed manually? Follow the [settings-preserving HACS migration guide](docs/hacs-migration.md).
+
 [Releases](https://github.com/domleblanc94/hive-virtual/releases) · [Issues](https://github.com/domleblanc94/hive-virtual/issues) · [Validation](docs/validation.md)
 
 ## Operation and manual installation
