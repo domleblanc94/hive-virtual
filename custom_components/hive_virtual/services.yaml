@@ -1,0 +1,11 @@
+reset_fault:
+  name: Reset heating fault
+  description: After checking the sensors, select Off and reset the latched fault. The request cooldown is retained.
+  fields:
+    entity_id:
+      name: Virtual thermostat
+      required: true
+      selector:
+        entity:
+          integration: hive_virtual
+          domain: climate

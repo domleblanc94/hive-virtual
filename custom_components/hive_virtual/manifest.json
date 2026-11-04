@@ -1,0 +1,21 @@
+{
+  "domain": "hive_virtual",
+  "name": "Hive Virtual Thermostat",
+  "after_dependencies": [
+    "frontend",
+    "panel_custom",
+    "persistent_notification"
+  ],
+  "codeowners": [
+    "@domleblanc94"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "hive"
+  ],
+  "documentation": "https://github.com/domleblanc94/hive-virtual",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/domleblanc94/hive-virtual/issues",
+  "requirements": [],
+  "version": "0.4.0"
+}

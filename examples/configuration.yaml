@@ -1,0 +1,57 @@
+# Merge these sections into configuration.yaml; replace all example entity IDs.
+climate:
+  - platform: hive_virtual
+    name: House virtual heating
+    unique_id: house_virtual_heating
+    hive_entity: climate.your_hive_heating
+    default_area: Downstairs
+    areas:
+      Upstairs:
+        - sensor.bedroom_temperature
+        - sensor.landing_temperature
+      Downstairs:
+        - sensor.living_room_temperature
+        - sensor.kitchen_temperature
+    idle_temperature: 7
+    call_temperature: 25
+    boost_minutes: 5
+    tolerance: 0.3
+    sensor_timeout: 30
+    sensor_min: 5
+    sensor_max: 35
+    max_sensor_jump: 3
+    jump_window: 10
+    max_sensor_spread: 6
+    high_temperature_cutoff: 28
+    schedule:
+      # Days: Monday=0 ... Sunday=6. Omit days to apply every day.
+      - time: "06:30"
+        days: [0, 1, 2, 3, 4]
+        temperature: 20
+        area: Downstairs
+      - time: "08:30"
+        days: [0, 1, 2, 3, 4]
+        temperature: 17
+        area: Downstairs
+      - time: "08:00"
+        days: [5, 6]
+        temperature: 20
+        area: Downstairs
+      - time: "17:00"
+        temperature: 20.5
+        area: Downstairs
+      - time: "22:00"
+        temperature: 18
+        area: Upstairs
+
+# Adds a native Home Assistant sidebar dashboard after restart.
+# Copy the accompanying dashboard file to /config/hive-virtual-dashboard.yaml.
+lovelace:
+  dashboards:
+    hive-heating:
+      mode: yaml
+      title: Hive Heating
+      icon: mdi:radiator
+      show_in_sidebar: true
+      require_admin: false
+      filename: hive-virtual-dashboard.yaml

@@ -1,0 +1,137 @@
+{
+  "title": "Hive Virtual Thermostat",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up room temperature control",
+        "description": "Choose the existing Hive heating zone and the temperature sensors for each floor. No additional Hive login is needed. An example daily schedule is created: 06:30 downstairs 20°C, 08:30 downstairs 17°C, 17:00 downstairs 20.5°C, and 22:00 upstairs 18°C. Change it afterwards in Configure → Schedule. The thermostat starts Off; confirm the low Hive fallback before selecting Auto. Leave the optional report-timestamp mapping empty unless your sensor integration exposes actual device report timestamps. After checking a latched fault, use Off → Reset heating fault → Auto/Heat.",
+        "data": {
+          "name": "Thermostat name",
+          "hive_entity": "Hive heating thermostat",
+          "downstairs_sensors": "Downstairs temperature sensors",
+          "upstairs_sensors": "Upstairs temperature sensors",
+          "default_area": "Temperature area for manual Heat mode",
+          "sensor_report_entities": "Optional sensor-to-report-timestamp mapping (advanced)"
+        }
+      }
+    },
+    "error": {
+      "invalid_settings": "These settings could not be saved. Check your selections and try again.",
+      "invalid_schedule": "Check the time, temperature, area and selected days. Select at least one day and avoid duplicate start times on the same day.",
+      "missing_sensors": "Select at least one temperature sensor for this area.",
+      "fallback_not_lower": "The fallback temperature must be lower than the Hive boost target.",
+      "sensor_limits_reversed": "The lowest plausible temperature must be below the highest plausible temperature.",
+      "invalid_value": "Enter a valid value within the allowed range."
+    },
+    "abort": {
+      "already_configured": "A virtual thermostat already controls this Hive zone.",
+      "controller_exists": "A controller already exists for this Hive zone. If it was set up in configuration.yaml, remove that climate entry and restart before adding it here."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hive Virtual Thermostat settings",
+        "description": "Changes apply to the running thermostat without switching it Off. Fault latches and request cooldowns are retained. A full Home Assistant restart still starts Off.",
+        "menu_options": {
+          "sensors": "Temperature sensors",
+          "schedule": "Weekly temperature schedule",
+          "safety": "Safety limits and heating requests",
+          "schedule_source": "Schedule source (native helper or built-in)"
+        }
+      },
+      "sensors": {
+        "title": "Temperature sensors",
+        "description": "Choose at least one temperature sensor for each floor. Existing average sensors can be selected if they have the temperature device class. Leave the optional report-timestamp mapping empty unless your sensor integration exposes actual device report timestamps. After checking a latched fault, use Off → Reset heating fault → Auto/Heat.",
+        "data": {
+          "downstairs_sensors": "Downstairs temperature sensors",
+          "upstairs_sensors": "Upstairs temperature sensors",
+          "default_area": "Temperature area for manual Heat mode",
+          "sensor_report_entities": "Optional sensor-to-report-timestamp mapping (advanced)"
+        }
+      },
+      "schedule": {
+        "title": "Weekly temperature schedule",
+        "description": "Add, edit or delete a period. Each period applies from its start time until the next matching period. Times use Home Assistant’s local timezone.",
+        "menu_options": {
+          "add_period": "Add a period",
+          "edit_period": "Edit a period",
+          "delete_period": "Delete a period"
+        }
+      },
+      "add_period": {
+        "title": "Add a schedule period",
+        "description": "Choose a time, target, temperature area and days. Avoid a start time already used on the same days.",
+        "data": {
+          "time": "Start time",
+          "temperature": "Target temperature (°C)",
+          "area": "Temperature area",
+          "days": "Days of the week"
+        }
+      },
+      "edit_period": {
+        "title": "Choose a period to edit",
+        "description": "Select the period you want to change.",
+        "data": {
+          "period": "Schedule period"
+        }
+      },
+      "period": {
+        "title": "Edit schedule period",
+        "description": "Change the time, target, temperature area or days.",
+        "data": {
+          "time": "Start time",
+          "temperature": "Target temperature (°C)",
+          "area": "Temperature area",
+          "days": "Days of the week"
+        }
+      },
+      "delete_period": {
+        "title": "Delete a schedule period",
+        "description": "Select the period to remove. Deleting the final period disables Auto until you add a new period.",
+        "data": {
+          "period": "Schedule period"
+        }
+      },
+      "safety": {
+        "title": "Safety limits and heating requests",
+        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. The controller saves its request deadline before contacting Hive and never resets the cooldown when settings change.",
+        "data": {
+          "call_temperature": "Hive boost target (°C)",
+          "idle_temperature": "Fallback target (°C)",
+          "boost_minutes": "Controller boost duration (minutes)",
+          "tolerance": "Temperature deadband (°C)",
+          "sensor_timeout": "Sensor report timeout (minutes)",
+          "sensor_min": "Lowest plausible sensor temperature (°C)",
+          "sensor_max": "Highest plausible sensor temperature (°C)",
+          "max_sensor_jump": "Maximum sudden change (°C)",
+          "jump_window": "Sudden-change checking window (minutes)",
+          "max_sensor_spread": "Maximum difference between room sensors (°C)",
+          "high_temperature_cutoff": "High-temperature cutoff (°C)",
+          "cooldown_minutes": "Minimum pause after a boost ends (minutes)",
+          "notifications": "Show persistent fault notifications"
+        }
+      },
+      "schedule_source": {
+        "title": "Schedule source",
+        "description": "For graphical weekly editing, create a Schedule helper under Settings → Devices & services → Helpers, then select it here. Each block needs Additional data: temperature (°C) and area (Upstairs or Downstairs). Gaps block new heat requests. Disable the helper option to use the built-in weekly periods.",
+        "data": {
+          "use_schedule_helper": "Use a native Schedule helper",
+          "schedule_entity": "Schedule helper"
+        }
+      }
+    },
+    "error": {
+      "invalid_settings": "These settings could not be saved. Check your selections and try again.",
+      "invalid_schedule": "Check the time, temperature, area and selected days. Select at least one day and avoid duplicate start times on the same day.",
+      "missing_sensors": "Select at least one temperature sensor for this area.",
+      "fallback_not_lower": "The fallback temperature must be lower than the Hive boost target.",
+      "sensor_limits_reversed": "The lowest plausible temperature must be below the highest plausible temperature.",
+      "invalid_value": "Enter a valid value within the allowed range.",
+      "missing_schedule": "Select a Schedule helper or disable the helper option."
+    },
+    "abort": {
+      "empty_schedule": "There are no periods to edit or delete. Open Configure → Schedule → Add a period."
+    }
+  }
+}

@@ -1,0 +1,76 @@
+title: Hive Heating
+views:
+  - title: Heating
+    path: heating
+    icon: mdi:radiator
+    cards:
+      - type: thermostat
+        entity: climate.house_virtual_heating
+        name: Room temperature control
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Follow schedule
+            icon: mdi:calendar-clock
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_hvac_mode
+              target:
+                entity_id: climate.house_virtual_heating
+              data:
+                hvac_mode: auto
+          - type: button
+            name: Stop new heating
+            icon: mdi:radiator-off
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_hvac_mode
+              target:
+                entity_id: climate.house_virtual_heating
+              data:
+                hvac_mode: "off"
+      - type: markdown
+        title: Heating status
+        content: >-
+          {% set e = 'climate.house_virtual_heating' %}
+          **Area:** {{ state_attr(e, 'active_area') }}
+
+          **Status:** {{ state_attr(e, 'control_status') }}
+
+          **Sensor fault:** {{ state_attr(e, 'sensor_fault') or 'None' }}
+
+          **Fault latched:** {{ state_attr(e, 'fault_latched') }}
+
+          **Heat requested:** {{ state_attr(e, 'heat_requested') }}
+
+          **Controller boost limit:** {{ state_attr(e, 'boost_minutes') }} minutes
+
+          Auto follows the schedule. Adjusting the target selects a manual hold.
+          After checking a latched sensor fault, select Off, then Auto or Heat to reset it.
+          Off prevents new boosts; an active boost is left to expire.
+      - type: markdown
+        title: Weekly temperature schedule
+        content: >-
+          {% set days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+          {% for s in state_attr('climate.house_virtual_heating', 'schedule') or [] %}
+          **{{ s.time }}** · {{ s.temperature }} °C · {{ s.area }} ·
+          {% for d in s.days %}{{ days[d] }} {% endfor %}
+
+          {% endfor %}
+
+          Edit UI-created schedules in the integration’s Configure settings. For YAML setup, edit configuration.yaml and restart.
+      - type: history-graph
+        title: Room temperature and heating
+        hours_to_show: 24
+        entities:
+          - entity: climate.house_virtual_heating
+          - entity: climate.your_hive_heating
+      - type: entities
+        title: Hive reported state
+        entities:
+          - entity: climate.your_hive_heating
+      - type: markdown
+        content: >-
+          Manual Hive boosts are left alone. Five-minute controller boosts are not
+          renewed while active. On expiry, Hive should return to the confirmed
+          low manual target. Test that behaviour on your hardware before relying on it.
