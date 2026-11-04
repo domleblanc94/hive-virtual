@@ -4,6 +4,8 @@
 
 Community room-temperature control with timed Hive requests, manual boost priority, sensor safeguards, a sidebar and weekly schedules. This project is not affiliated with Hive or Home Assistant.
 
+Built by [domleblanc94](https://github.com/domleblanc94) with [OpenAI Codex](https://github.com/apps/chatgpt-codex-connector). Codex generated the implementation, tests and documentation under the owner's direction; the logo was created with OpenAI image generation. AI assistance does not imply OpenAI maintenance or endorsement.
+
 **Experimental:** Home Assistant 2026.10.4 runtime tests use simulated Hive actions. Physical boost expiry and boiler behaviour still require the supervised tests below.
 
 ## Install and update with HACS
