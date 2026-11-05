@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Optionally keep using the remaining temperature sensors on the active floor when some are unavailable. Stop new boosts when none remain.
+
 ## 0.6.1
 
 - Add an optional availability check for temperature sensors that only report changes. Missing, unknown and unavailable readings still block new virtual boosts.

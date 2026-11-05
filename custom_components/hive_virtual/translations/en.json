@@ -95,7 +95,7 @@
       },
       "safety": {
         "title": "Safety limits and heating requests",
-        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. Enable Keep Hive’s own mode and target to manage the fallback in Hive. The fixed fallback field is ignored when enabled. Hive can heat on its own between boosts, even with the virtual thermostat Off or a sensor fault. For sensors that report only on change, availability mode accepts unchanged readings until Home Assistant marks the entity unknown or unavailable. Explicit device-report timestamps still use the timeout.",
+        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. Enable Keep Hive’s own mode and target to manage the fallback in Hive. The fixed fallback field is ignored when enabled. Hive can heat on its own between boosts, even with the virtual thermostat Off or a sensor fault. For sensors that report only on change, availability mode accepts unchanged readings until Home Assistant marks the entity unknown or unavailable. Explicit device-report timestamps still use the timeout. Enable Use remaining sensors when some are unavailable to keep using an area while at least one sensor is available.",
         "data": {
           "call_temperature": "Hive boost target (°C)",
           "idle_temperature": "Fixed fallback target (°C)",
@@ -104,6 +104,7 @@
           "tolerance": "Temperature deadband (°C)",
           "sensor_timeout": "Sensor report timeout (minutes)",
           "use_sensor_availability": "Use sensor availability instead of last update time",
+          "allow_partial_area": "Use remaining sensors when some are unavailable",
           "sensor_min": "Lowest plausible sensor temperature (°C)",
           "sensor_max": "Highest plausible sensor temperature (°C)",
           "max_sensor_jump": "Maximum sudden change (°C)",

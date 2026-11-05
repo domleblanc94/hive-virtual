@@ -275,6 +275,38 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entity.fault_message, "out_of_range:sensor.down")
         self.call.assert_awaited_once()
 
+    async def test_partial_area_uses_remaining_sensor_then_leaves_heating_to_hive(self):
+        self.entity.config.update(allow_partial_area=True, use_sensor_availability=True, preserve_hive_settings=True)
+        self.entity.config["areas"]["Downstairs"].append("sensor.living_room")
+        self.states["sensor.living_room"] = state("20", unit_of_measurement="°C")
+        self.assertEqual(self.entity.area_temperature("Downstairs"), 19)
+        self.states["sensor.living_room"].state = "unknown"
+        await self.entity.async_turn_on()
+        self.assertEqual(self.entity.current_temperature, 18)
+        self.assertEqual(self.entity.area_temperature("Downstairs"), 18)
+        self.assertTrue(self.entity._demand)
+        self.call.assert_awaited_once()
+
+        self.entity._pending_until -= timedelta(minutes=8)
+        self.states["sensor.down"].state = "unavailable"
+        await self.entity._reconcile()
+        self.assertIsNone(self.entity.current_temperature)
+        self.assertIsNone(self.entity.area_temperature("Downstairs"))
+        self.assertEqual(self.entity.fault_message, "no_available_sensors:Downstairs")
+        self.assertFalse(self.entity._demand)
+        self.call.assert_awaited_once()
+
+        self.states["sensor.living_room"].state = "17"
+        await self.entity._reconcile()
+        self.assertEqual(self.entity.current_temperature, 17)
+        self.assertIsNone(self.entity.fault_message)
+        self.assertEqual(self.call.await_count, 2)
+
+        self.states["sensor.living_room"].state = "60"
+        await self.entity._reconcile()
+        self.assertEqual(self.entity.fault_message, "out_of_range:sensor.living_room")
+        self.assertFalse(self.entity._demand)
+
     async def test_service_error_is_retried(self):
         self.call.side_effect = RuntimeError("offline")
         with self.assertLogs(climate.__name__, level="ERROR"):

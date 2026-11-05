@@ -153,6 +153,7 @@ class HiveVirtualOptionsFlow(config_entries.OptionsFlow):
             for key, (low, high, step) in limits.items()}
         fields[vol.Required("notifications", default=config.get("notifications", True))] = selector.BooleanSelector()
         fields[vol.Required("use_sensor_availability", default=config.get("use_sensor_availability", False))] = selector.BooleanSelector()
+        fields[vol.Required("allow_partial_area", default=config.get("allow_partial_area", False))] = selector.BooleanSelector()
         fields[vol.Required("preserve_hive_settings", default=config.get("preserve_hive_settings", False))] = selector.BooleanSelector()
         schema = vol.Schema(fields)
         return self.async_show_form(step_id="safety", data_schema=schema, errors=errors)

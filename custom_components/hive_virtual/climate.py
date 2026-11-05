@@ -51,6 +51,7 @@ CONFIG_SCHEMA = vol.Schema({
     vol.Optional("tolerance", default=0.3): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2)),
     vol.Optional("sensor_timeout", default=120): vol.All(vol.Coerce(int), vol.Range(min=1)),
     vol.Optional("use_sensor_availability", default=False): cv.boolean,
+    vol.Optional("allow_partial_area", default=False): cv.boolean,
     vol.Optional("boost_minutes", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=15)),
     vol.Optional("sensor_min", default=5): vol.All(vol.Coerce(float), vol.Range(min=-10, max=30)),
     vol.Optional("sensor_max", default=35): vol.All(vol.Coerce(float), vol.Range(min=10, max=50)),
@@ -168,7 +169,9 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         values = []
         for entity in self.config["areas"][area]:
             state = self.hass.states.get(entity)
-            if self._sensor_state_fault(state):
+            if fault := self._sensor_state_fault(state):
+                if fault == "sensor_unavailable" and self.config.get("allow_partial_area", False):
+                    continue
                 return None
             value = average([state.state])
             unit = state.attributes.get("unit_of_measurement")
@@ -346,6 +349,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         for entity_id in areas[self._area]:
             state = self.hass.states.get(entity_id)
             if fault := self._sensor_state_fault(state):
+                if fault == "sensor_unavailable" and self.config.get("allow_partial_area", False):
+                    continue
                 self._fault = f"{fault}:{entity_id}"
                 return None
             if report_entity := self.config["sensor_report_entities"].get(entity_id):
@@ -364,6 +369,9 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 self._fault = f"invalid_reading:{entity_id}"
                 return None
             values[entity_id] = TemperatureConverter.convert(value, unit, UnitOfTemperature.CELSIUS)
+        if not values:
+            self._fault = f"no_available_sensors:{self._area}"
+            return None
         rejection = self._guard.check(values, dt_util.utcnow(), self.config["sensor_min"],
             self.config["sensor_max"], self.config["max_sensor_jump"],
             self.config["jump_window"], self.config["max_sensor_spread"])
