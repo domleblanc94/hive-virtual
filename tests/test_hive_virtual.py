@@ -305,6 +305,30 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.entity.async_turn_on()
         self.call.assert_not_called()
 
+    async def test_hive_managed_fallback_only_sends_timed_boosts(self):
+        self.entity.config["preserve_hive_settings"] = True
+        self.states["climate.hive"].attributes["temperature"] = 18
+        await self.entity._reconcile()
+        self.call.assert_not_called()
+        await self.entity.async_turn_on()
+        self.assertEqual(self.call.call_args.args[:2], ("hive", "boost_heating_on"))
+        self.assertEqual(self.call.call_args.args[2]["time_period"], "00:05:00")
+        self.states["climate.hive"].attributes.update(preset_mode="boost", temperature=32)
+        await self.entity._reconcile()
+        self.states["climate.hive"].attributes.update(preset_mode="none", temperature=19)
+        self.states["sensor.down"].state = "unavailable"
+        await self.entity._reconcile()
+        await self.entity.async_turn_off()
+        self.call.assert_awaited_once()
+
+    async def test_warmer_fixed_fallback_and_ignored_native_fallback(self):
+        config = climate.validate_config({**self.entity.config, "idle_temperature": 18})
+        self.entity.config = config
+        await self.entity.async_turn_on()
+        self.assertEqual(self.call.call_args.args[:2], ("climate", "set_temperature"))
+        self.assertEqual(self.call.call_args.args[2]["temperature"], 18)
+        climate.validate_config({**config, "preserve_hive_settings": True, "call_temperature": 17})
+
     async def test_auto_schedule_and_manual_hold(self):
         now = datetime.now(timezone.utc)
         self.entity.config["schedule"] = [{"time": "00:00", "temperature": 21, "area": "Upstairs"}]

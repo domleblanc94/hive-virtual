@@ -26,7 +26,15 @@ Already installed manually? Follow the [settings-preserving HACS migration guide
 
 ## Operation and manual installation
 
-## New in 0.5.0: edit and monitor from Hive Heating
+## Choose how Hive takes over
+
+Open **Settings → Devices & services → Hive Virtual Thermostat → Configure → Safety limits and heating requests** and enable **Keep Hive’s own mode and target**. Once any active boost ends, set Hive to Manual and choose the temperature on the Hive app or physical thermostat. You can also select Hive’s own schedule. Hive can heat independently between boosts, during a Home Assistant outage or sensor fault, and while the virtual thermostat is Off.
+
+With that option disabled, Home Assistant sets a **Fixed fallback target** of 7–30°C, within the device’s limits and below the boost target. Existing installations retain their current fallback until changed.
+
+## Edit and monitor from Hive Heating
+
+Thermostat controls stay above the **Schedule**, **History**, and **Gas & costs** tabs. In **Schedule → Edit schedule**, set **Start** and **Area** for each period to choose when control switches floors. Select **Follow schedule** on the thermostat. Each gas sensor field supports search by name or entity ID.
 
 After updating through HACS, restart Home Assistant and refresh the browser. Select **Auto** again when ready (a full restart still starts Off). Existing settings, schedules, faults and pending request deadlines are retained.
 
@@ -67,7 +75,7 @@ A community Home Assistant integration that controls one Hive heating zone from 
 1. Disable competing old thermostat/boost automations. Use only one controller per physical Hive zone.
 2. Replace `/config/custom_components/hive_virtual` with the complete `custom_components/hive_virtual` folder from this ZIP. Include the new frontend, brand, binary_sensor, button, panel and translation files.
 3. Restart Home Assistant fully and refresh the browser. Existing UI entries/options remain usable. If setting up for the first time, go to Settings → Devices & services → Add integration → Hive Virtual Thermostat, then select Hive and your room sensors. Do not also add a YAML controller for the same zone.
-4. Before first use, end any old boost and set Hive to manual 7°C. This is essential when upgrading from 0.1's high-manual-target design. Active boosts are deliberately left alone, so their underlying fallback cannot be verified while they run.
+4. Before first use, end any old boost and check the underlying mode and target in Hive. For the default fixed fallback, set Hive to manual 7°C. For Hive-managed fallback, select your preferred mode and target on Hive.
 5. Open Hive Heating in the sidebar. If hidden by personal sidebar preferences, enable it there. The automatic page has URL `/hive-virtual-heating`; an older manual dashboard may have `/hive-heating`.
 6. Choose Auto to follow the selected schedule, or Heat for a manual hold. Complete the supervised hardware tests below before relying on the offline protection.
 
@@ -99,15 +107,15 @@ Auto follows the selected schedule. Adjusting a target while in Auto selects man
 
 ## Heating requests and offline behaviour
 
-The controller first confirms a low Hive target and manual mode. It then requests heat ONLY with timed Hive boosts: 5 minutes by default, adjustable 1–15 minutes. The request deadline plus cooldown is durably saved before contacting Hive. A lost/failed response cannot trigger an immediate repeat. Matching fallback targets are not written repeatedly. Fresh Hive state after startup is required before new requests.
+In fixed-fallback mode, the controller confirms the configured Hive target and manual mode. With Hive-managed fallback, it leaves both settings to Hive. It then requests heat ONLY with timed Hive boosts: 5 minutes by default, adjustable 1–15 minutes. The request deadline plus cooldown is durably saved before contacting Hive. A lost/failed response cannot trigger an immediate repeat. Matching fallback targets are not written repeatedly. Fresh Hive state after startup is required before new requests.
 
-If Home Assistant stops, it cannot request another boost. The last controller boost should expire through Hive and return to the confirmed low fallback. This still requires a successful timed request and correct Hive firmware behaviour: verify expiry on your model with Home Assistant powered off. Frost-protection heating at the fallback (7°C by default, configurable up to 10°C) is still possible.
+If Home Assistant stops, it cannot request another boost. The last controller boost should expire through Hive and return to the underlying Hive settings. Verify expiry and return temperature on your model with Home Assistant powered off. Hive can still call for heat at the underlying target.
 
 There is ONE Hive boost channel. The controller never cancels or extends an active boost, whether started by HA or a person. You can start/extend/cancel boosts in Hive. A manually extended boost follows YOUR duration and temperature, not the controller limit. Meeting the room target, selecting Off, or detecting a bad sensor prevents new requests but does not interrupt a running boost. Controller heat may therefore continue for its remaining duration after a fault. This is the tradeoff for preserving manual boosts without guessing who owns them.
 
 Cloud polling creates a remaining race: an app boost started just before an HA command may not yet be visible. The supported climate entity provides no atomic ownership check. This release rechecks known boost state before issuing a request, but cannot guarantee independent simultaneous control. Replacing the custom integration with automations would not remove that cloud limitation.
 
-Timed pulses can produce overshoot/cycling. Choose a sensible `call_temperature` ceiling (UI default 25°C), boost duration, deadband and cooldown while observing your heating system. The real Hive sensor can stop demand at the ceiling even if the remote rooms are cold. This controller does not replace Hive's internal temperature sensor, physically zone radiators, or preserve the Hive native heating schedule: it uses a low manual fallback outside boosts.
+Timed pulses can produce overshoot/cycling. Choose a sensible `call_temperature` ceiling (UI default 25°C), boost duration, deadband and cooldown while observing your heating system. The real Hive sensor can stop demand at the ceiling even if the remote rooms are cold. Area selection changes which sensors the virtual thermostat uses. Hive still measures its own temperature, and radiators remain in the same physical heating zone. With Hive-managed fallback, Hive’s native schedule can continue outside boosts.
 
 ## Sensor checks and fault reset
 
@@ -145,8 +153,8 @@ The release includes offline control/config-flow/storage/notification tests and 
 
 On your system:
 
-1. Enable Heat above the room average with Hive at manual 7°C. Confirm the requested duration/target in the Hive app.
-2. Power off Home Assistant mid-boost. Confirm Hive ends that timed boost and returns to the low fallback; observe actual boiler demand. Do not rely on the failsafe until this passes.
+1. Set up the desired fallback. Enable Heat above the room average and confirm the requested duration/target in the Hive app.
+2. Power off Home Assistant mid-boost. Confirm Hive ends that timed boost and returns to the selected fallback mode and target. Observe actual boiler demand. Do not rely on the failsafe until this passes.
 3. With HA running, extend/start a manual Hive boost, change virtual targets and select Off. Confirm no early cancellation. Cancel in Hive when desired.
 4. In a test setup, inject an out-of-range/suddenly low reading. Confirm the problem sensor/notification and that no further boosts start. Restart HA and verify the fault remains. Correct the sensor, use Off → Reset fault → Auto/Heat.
 5. Edit a native schedule block and an integration setting. Confirm the running mode and pending cooldown are retained. Check a midnight area change, helper gaps and Off after a full restart.

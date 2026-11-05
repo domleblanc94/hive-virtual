@@ -4,6 +4,24 @@ function input(type,value){const e=node('input');e.type=type;e.value=value;retur
 function choice(values,value){const e=node('select');for(const v of values){const o=node('option',typeof v==='string'?v:v.label);o.value=typeof v==='string'?v:v.value;e.append(o);}e.value=value;return e;}
 function field(label,control){const e=node('label');e.append(node('span',label),control);return e;}
 function button(label,action){const b=node('button',label);b.type='button';b.onclick=action;return b;}
+function sensorPicker(label, options, selected) {
+  const search = input('search', '');
+  search.placeholder = 'Name or entity ID';
+  const select = choice(options, selected);
+  search.oninput = () => {
+    const query = search.value.trim().toLowerCase();
+    const current = select.value;
+    const matches = options.filter(({value, label}) => !value || value === current ||
+      `${label} ${value}`.toLowerCase().includes(query));
+    select.replaceChildren(...choice(matches, current).options);
+    select.value = current;
+  };
+  select.onchange = search.oninput;
+  const group = node('div');
+  group.className = 'sensor-picker';
+  group.append(field(`Search ${label.toLowerCase()}`, search), field(label, select));
+  return {group, select};
+}
 export function nativeRows(item){return DAYS.flatMap((day,i)=>(item[day]||[]).map(block=>({time:block.from.slice(0,5),end:block.to.slice(0,5),temperature:block.data?.temperature,area:block.data?.area,days:[i],extra:{...block.data}})));}
 export function nativePayload(rows,item){
   const result={type:'schedule/update',schedule_id:item.id,name:item.name};if(item.icon)result.icon=item.icon;
@@ -21,7 +39,7 @@ export async function scheduleEditor(panel,host,state){
     if(!original)throw Error('This schedule is defined in YAML and is read-only here. Edit its configuration file.');
   }
   host.replaceChildren();const title=node('h3',original?'Edit native schedule blocks':'Edit weekly temperature periods');host.append(title);
-  host.append(node('p',original?'Each block has a start and end. Gaps stop new heating requests. Use 24:00 for midnight.':'Each period runs until the next matching period. Times use Home Assistant’s timezone.'));
+  host.append(node('p',original?'Set Area to Upstairs or Downstairs for each block. Gaps stop new heating requests. Use 24:00 for midnight.':'Set Start and Area to choose when the thermostat switches floors. Each period runs until the next matching period. Times use Home Assistant’s timezone.'));
   const list=node('div'), forms=[];host.append(list);
   function addRow(old={time:'12:00',end:'13:00',temperature:20,area:config.areas[0],days:[0,1,2,3,4,5,6]}){
     const row=node('div');row.className='schedule-row';
@@ -60,7 +78,8 @@ export async function costEditor(panel,host,state){
   const controls={};
   for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)'})){
     const options=old[key]&&!sensors.some(s=>s.value===old[key])?[...sensors,{value:old[key],label:`${old[key]} (currently missing)`}]:sensors;
-    const c=choice(options,old[key]||'');controls[key]=c;host.append(field(label,c));
+    const {group,select}=sensorPicker(label,options,old[key]||'');
+    controls[key]=select;host.append(group);
   }
   for(const[key,label,max]of [['boiler_input_kw','Estimated gas INPUT power while heating (kW; 0 disables estimate)',100],['gas_kwh_per_m3','kWh per m³ conversion (only for a volume sensor; 0 disables conversion)',20]]){
     const c=input('number',old[key]||0);c.min=0;c.max=max;c.step=.01;controls[key]=c;host.append(field(label,c));

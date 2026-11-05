@@ -19,7 +19,7 @@ async def async_setup_panel(hass):
     await panel_custom.async_register_panel(hass,
         webcomponent_name="hive-virtual-panel", frontend_url_path=path,
         sidebar_title="Hive Heating", sidebar_icon="mdi:radiator",
-        module_url="/hive_virtual/frontend/panel.js?v=0.5.0", require_admin=False)
+        module_url="/hive_virtual/frontend/panel.js?v=0.6.0", require_admin=False)
     data["registered"] = True
 
 

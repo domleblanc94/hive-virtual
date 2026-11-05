@@ -140,7 +140,7 @@ class HiveVirtualOptionsFlow(config_entries.OptionsFlow):
                 errors = validation_errors(err)
                 config = {**config, **user_input}
         limits = {
-            "call_temperature": (7, 32, 0.5), "idle_temperature": (7, 10, 0.5),
+            "call_temperature": (7, 32, 0.5), "idle_temperature": (7, 30, 0.5),
             "boost_minutes": (1, 15, 1), "tolerance": (0.1, 2, 0.1),
             "sensor_timeout": (1, 240, 1), "sensor_min": (-10, 30, 0.5),
             "sensor_max": (10, 50, 0.5), "max_sensor_jump": (0.1, 10, 0.1),
@@ -152,6 +152,7 @@ class HiveVirtualOptionsFlow(config_entries.OptionsFlow):
             "min": low, "max": high, "step": step, "mode": "box"})
             for key, (low, high, step) in limits.items()}
         fields[vol.Required("notifications", default=config.get("notifications", True))] = selector.BooleanSelector()
+        fields[vol.Required("preserve_hive_settings", default=config.get("preserve_hive_settings", False))] = selector.BooleanSelector()
         schema = vol.Schema(fields)
         return self.async_show_form(step_id="safety", data_schema=schema, errors=errors)
 

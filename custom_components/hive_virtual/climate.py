@@ -1,4 +1,4 @@
-"""Scheduled room control using bounded Hive boosts over a low fallback."""
+"""Scheduled room control using bounded Hive boosts."""
 import asyncio
 from datetime import timedelta
 import logging
@@ -46,7 +46,8 @@ CONFIG_SCHEMA = vol.Schema({
     }),
     vol.Optional("target_temperature", default=20): vol.All(vol.Coerce(float), vol.Range(min=7, max=30)),
     vol.Optional("call_temperature", default=32): vol.All(vol.Coerce(float), vol.Range(min=7, max=32)),
-    vol.Optional("idle_temperature", default=7): vol.All(vol.Coerce(float), vol.Range(min=7, max=10)),
+    vol.Optional("idle_temperature", default=7): vol.All(vol.Coerce(float), vol.Range(min=7, max=30)),
+    vol.Optional("preserve_hive_settings", default=False): cv.boolean,
     vol.Optional("tolerance", default=0.3): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2)),
     vol.Optional("sensor_timeout", default=120): vol.All(vol.Coerce(int), vol.Range(min=1)),
     vol.Optional("boost_minutes", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=15)),
@@ -86,7 +87,7 @@ def validate_config(config):
         raise vol.Invalid("At least one temperature area is required")
     if config.get("default_area", next(iter(config["areas"]))) not in config["areas"]:
         raise vol.Invalid("default_area must name a configured area")
-    if config["idle_temperature"] >= config["call_temperature"]:
+    if not config["preserve_hive_settings"] and config["idle_temperature"] >= config["call_temperature"]:
         raise vol.Invalid("fallback_not_lower", path=["idle_temperature"])
     if not config["hive_entity"].startswith("climate."):
         raise vol.Invalid("hive_entity must be a climate entity")
@@ -107,7 +108,7 @@ def validate_config(config):
 
 
 class HiveVirtual(ClimateEntity, RestoreEntity):
-    """Use bounded boosts over a confirmed low baseline; never cancel boosts."""
+    """Request bounded boosts without cancelling active boosts."""
 
     _attr_should_poll = False
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -452,9 +453,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         if unit != "°C":
             self._status = "unsupported_temperature_unit"
             return
-        desired = TemperatureConverter.convert(self.config["idle_temperature"], UnitOfTemperature.CELSIUS, unit)
-        if not hive.attributes.get("min_temp", desired) <= desired <= hive.attributes.get("max_temp", desired):
-            self._status = "target_out_of_range"
+        preserve = self.config.get("preserve_hive_settings", False)
+        if preserve and not self._demand:
             return
         if not hive.attributes.get("min_temp", 7) <= self.config["call_temperature"] <= hive.attributes.get("max_temp", 32):
             self._status = "target_out_of_range"
@@ -470,18 +470,22 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             return
         if self._boosting():
             return
-        # Confirm low target BEFORE enabling manual mode; confirm manual mode
-        # on another update BEFORE issuing any bounded demand.
-        if hive.attributes.get("temperature") != desired:
-            await self.hass.services.async_call("climate", "set_temperature", {
-                "entity_id": self.config["hive_entity"], "temperature": desired}, blocking=True)
-            self._status = "setting_safe_baseline"
-            return
-        if hive.state != HVACMode.HEAT:
-            await self.hass.services.async_call("climate", "set_hvac_mode", {
-                "entity_id": self.config["hive_entity"], "hvac_mode": HVACMode.HEAT}, blocking=True)
-            self._status = "setting_safe_baseline"
-            return
+        if not preserve:
+            # Confirm the fixed target and manual mode before requesting a boost.
+            desired = self.config["idle_temperature"]
+            if not hive.attributes.get("min_temp", desired) <= desired <= hive.attributes.get("max_temp", desired):
+                self._status = "target_out_of_range"
+                return
+            if hive.attributes.get("temperature") != desired:
+                await self.hass.services.async_call("climate", "set_temperature", {
+                    "entity_id": self.config["hive_entity"], "temperature": desired}, blocking=True)
+                self._status = "setting_safe_baseline"
+                return
+            if hive.state != HVACMode.HEAT:
+                await self.hass.services.async_call("climate", "set_hvac_mode", {
+                    "entity_id": self.config["hive_entity"], "hvac_mode": HVACMode.HEAT}, blocking=True)
+                self._status = "setting_safe_baseline"
+                return
         if not self._demand:
             return
         minutes = self.config["boost_minutes"]
@@ -517,6 +521,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 "sensor_fault": self._fault, "fault_latched": self._latched_fault is not None,
                 "schedule": self.config["schedule"], "schedule_active": self._slot,
                 "boost_minutes": self.config["boost_minutes"],
+                "preserve_hive_settings": self.config.get("preserve_hive_settings", False),
                 "fault_reason": self.fault_message, "schedule_entity": self.config.get("schedule_entity"),
                 "cooldown_minutes": self.config["cooldown_minutes"],
                 "temperature_areas": list(self.config["areas"]),

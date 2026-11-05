@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Set up room temperature control",
-        "description": "Choose the existing Hive heating zone and the temperature sensors for each floor. No additional Hive login is needed. An example daily schedule is created: 06:30 downstairs 20°C, 08:30 downstairs 17°C, 17:00 downstairs 20.5°C, and 22:00 upstairs 18°C. Change it afterwards in Configure → Schedule. The thermostat starts Off; confirm the low Hive fallback before selecting Auto. Leave the optional report-timestamp mapping empty unless your sensor integration exposes actual device report timestamps. After checking a latched fault, use Off → Reset heating fault → Auto/Heat.",
+        "description": "Choose the existing Hive heating zone and the temperature sensors for each floor. No additional Hive login is needed. An example daily schedule is created: 06:30 downstairs 20°C, 08:30 downstairs 17°C, 17:00 downstairs 20.5°C, and 22:00 upstairs 18°C. Change it afterwards in Configure → Schedule. The thermostat starts Off; confirm the desired Hive fallback before selecting Auto. Leave the optional report-timestamp mapping empty unless your sensor integration exposes actual device report timestamps. After checking a latched fault, use Off → Reset heating fault → Auto/Heat.",
         "data": {
           "name": "Thermostat name",
           "hive_entity": "Hive heating thermostat",
@@ -95,10 +95,11 @@
       },
       "safety": {
         "title": "Safety limits and heating requests",
-        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. The controller saves its request deadline before contacting Hive and never resets the cooldown when settings change.",
+        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. Enable Keep Hive’s own mode and target to manage the fallback in Hive. The fixed fallback field is ignored when enabled. Hive can heat on its own between boosts, even with the virtual thermostat Off or a sensor fault.",
         "data": {
           "call_temperature": "Hive boost target (°C)",
-          "idle_temperature": "Fallback target (°C)",
+          "idle_temperature": "Fixed fallback target (°C)",
+          "preserve_hive_settings": "Keep Hive’s own mode and target",
           "boost_minutes": "Controller boost duration (minutes)",
           "tolerance": "Temperature deadband (°C)",
           "sensor_timeout": "Sensor report timeout (minutes)",

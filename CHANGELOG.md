@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Keep Hive’s own mode and target between timed boosts, or configure a fixed fallback up to 30°C within the device and boost limits.
+- Keep the thermostat visible across Schedule, History, and Gas & costs views.
+- Clarify floor switching in the schedule editor and add search to gas sensor pickers.
+
 ## 0.5.0
 
 - Edit built-in periods and native Schedule helper blocks directly on Hive Heating.
