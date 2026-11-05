@@ -128,6 +128,8 @@ All sensors in the selected area must be available, numeric, finite, have a supp
 
 Range/jump/disagreement/high-temperature faults latch and survive restarts. Check the sensors, select Off, press Reset heating fault, then select Auto/Heat. Off→Heat alone no longer clears a serious fault. Reset fails while heating is enabled or readings remain invalid. A reset clears jump history, so the first plausible reading after reset cannot be independently verified. Missing/stale/nonnumeric readings block demand and recover automatically once valid.
 
+For BLE sensors that only report changes and reliably become `unknown` or `unavailable` when disconnected, enable **Use sensor availability instead of last update time** under **Configure → Safety limits and heating requests**. In YAML, use `use_sensor_availability: true`. This applies to all temperature areas. The controller accepts unchanged numeric readings regardless of age, and blocks new boosts when a sensor in the active area loses its usable reading. Range, jump, disagreement and high-temperature checks still apply. Explicit device-report timestamp mappings still use the configured timeout. A sensor that stays stuck on a plausible number after disconnecting will still be treated as available.
+
 The Heating fault binary sensor is on for current problems. Optional persistent notifications are enabled by default under Configure → Safety limits. Storage errors require correcting the underlying disk/storage problem and restarting; the ordinary sensor reset does not bypass failed safety storage. A pending request/cooldown is never cleared by resetting a sensor fault.
 
 ### Actual-device freshness (optional advanced setting)

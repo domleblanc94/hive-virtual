@@ -50,6 +50,7 @@ CONFIG_SCHEMA = vol.Schema({
     vol.Optional("preserve_hive_settings", default=False): cv.boolean,
     vol.Optional("tolerance", default=0.3): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2)),
     vol.Optional("sensor_timeout", default=120): vol.All(vol.Coerce(int), vol.Range(min=1)),
+    vol.Optional("use_sensor_availability", default=False): cv.boolean,
     vol.Optional("boost_minutes", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=15)),
     vol.Optional("sensor_min", default=5): vol.All(vol.Coerce(float), vol.Range(min=-10, max=30)),
     vol.Optional("sensor_max", default=35): vol.All(vol.Coerce(float), vol.Range(min=10, max=50)),
@@ -155,11 +156,19 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self.config.setdefault("cost", {"currency": "GBP", "rate_in_pence": False, "cost_in_pence": False,
                                       "boiler_input_kw": 0, "gas_kwh_per_m3": 0})
 
+    def _sensor_state_fault(self, state):
+        if state is None or state.state in ("unknown", "unavailable"):
+            return "sensor_unavailable"
+        if (not self.config.get("use_sensor_availability", False)
+                and (dt_util.utcnow() - state.last_reported).total_seconds() > self.config["sensor_timeout"] * 60):
+            return "missing_or_stale"
+        return None
+
     def area_temperature(self, area):
         values = []
         for entity in self.config["areas"][area]:
             state = self.hass.states.get(entity)
-            if not state or (dt_util.utcnow() - state.last_reported).total_seconds() > self.config["sensor_timeout"] * 60:
+            if self._sensor_state_fault(state):
                 return None
             value = average([state.state])
             unit = state.attributes.get("unit_of_measurement")
@@ -336,8 +345,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         values = {}
         for entity_id in areas[self._area]:
             state = self.hass.states.get(entity_id)
-            if state is None or (dt_util.utcnow() - state.last_reported).total_seconds() > self.config["sensor_timeout"] * 60:
-                self._fault = f"missing_or_stale:{entity_id}"
+            if fault := self._sensor_state_fault(state):
+                self._fault = f"{fault}:{entity_id}"
                 return None
             if report_entity := self.config["sensor_report_entities"].get(entity_id):
                 report = self.hass.states.get(report_entity)

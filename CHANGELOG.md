@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- Add an optional availability check for temperature sensors that only report changes. Missing, unknown and unavailable readings still block new virtual boosts.
+
 ## 0.6.0
 
 - Keep Hive’s own mode and target between timed boosts, or configure a fixed fallback up to 30°C within the device and boost limits.

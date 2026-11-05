@@ -256,6 +256,25 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entity.current_temperature, 20)
         self.call.assert_not_called()
 
+    async def test_availability_mode_accepts_unchanged_but_rejects_unusable_sensor(self):
+        self.entity.config["use_sensor_availability"] = True
+        sensor = self.states["sensor.down"]
+        sensor.last_reported -= timedelta(hours=3)
+        await self.entity.async_turn_on()
+        self.call.assert_awaited_once()
+        self.assertTrue(self.entity._demand)
+        self.assertEqual(self.entity.area_temperature("Downstairs"), 18)
+        for value in ("unknown", "unavailable"):
+            sensor.state = value
+            await self.entity._reconcile()
+            self.assertFalse(self.entity._demand)
+            self.assertIsNone(self.entity.area_temperature("Downstairs"))
+            self.assertEqual(self.entity.fault_message, "sensor_unavailable:sensor.down")
+        sensor.state = "60"
+        await self.entity._reconcile()
+        self.assertEqual(self.entity.fault_message, "out_of_range:sensor.down")
+        self.call.assert_awaited_once()
+
     async def test_service_error_is_retried(self):
         self.call.side_effect = RuntimeError("offline")
         with self.assertLogs(climate.__name__, level="ERROR"):
