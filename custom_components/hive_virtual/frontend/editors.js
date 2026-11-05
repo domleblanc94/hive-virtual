@@ -4,23 +4,21 @@ function input(type,value){const e=node('input');e.type=type;e.value=value;retur
 function choice(values,value){const e=node('select');for(const v of values){const o=node('option',typeof v==='string'?v:v.label);o.value=typeof v==='string'?v:v.value;e.append(o);}e.value=value;return e;}
 function field(label,control){const e=node('label');e.append(node('span',label),control);return e;}
 function button(label,action){const b=node('button',label);b.type='button';b.onclick=action;return b;}
-function sensorPicker(label, options, selected) {
-  const search = input('search', '');
-  search.placeholder = 'Name or entity ID';
-  const select = choice(options, selected);
-  search.oninput = () => {
-    const query = search.value.trim().toLowerCase();
-    const current = select.value;
-    const matches = options.filter(({value, label}) => !value || value === current ||
-      `${label} ${value}`.toLowerCase().includes(query));
-    select.replaceChildren(...choice(matches, current).options);
-    select.value = current;
-  };
-  select.onchange = search.oninput;
-  const group = node('div');
-  group.className = 'sensor-picker';
-  group.append(field(`Search ${label.toLowerCase()}`, search), field(label, select));
-  return {group, select};
+function sensorPicker(id, options, selected) {
+  const control = input('text', selected);
+  control.placeholder = 'Search by name or entity ID';
+  control.autocomplete = 'off';
+  const list = node('datalist');
+  list.id = id;
+  control.setAttribute('list', id);
+  for (const {value,label} of options) {
+    const option = node('option');
+    option.value = value;
+    option.label = label;
+    list.append(option);
+  }
+  control.oninput = () => control.setCustomValidity('');
+  return {control, list};
 }
 export function nativeRows(item){return DAYS.flatMap((day,i)=>(item[day]||[]).map(block=>({time:block.from.slice(0,5),end:block.to.slice(0,5),temperature:block.data?.temperature,area:block.data?.area,days:[i],extra:{...block.data}})));}
 export function nativePayload(rows,item){
@@ -29,7 +27,7 @@ export function nativePayload(rows,item){
   for(const r of rows)for(const d of r.days)result[DAYS[d]].push({from:r.time+':00',to:r.end+':00',data:{...r.extra,temperature:r.temperature,area:r.area}});
   return result;
 }
-export async function scheduleEditor(panel,host,state){
+export async function scheduleEditor(panel,host,state,collapse){
   const hass=panel._hass, config=await hass.callWS({type:'hive_virtual/config',entity_id:state.entity_id});
   let original=null;
   if(config.schedule_entity){
@@ -66,20 +64,20 @@ export async function scheduleEditor(panel,host,state){
         if(JSON.stringify(current)!==JSON.stringify(original))throw Error('Schedule changed elsewhere. Close and reopen the editor.');
         await hass.callWS(nativePayload(rows,original));
       }else await hass.callWS({type:'hive_virtual/save',entity_id:state.entity_id,revision:config.revision,schedule:rows.map(({end,extra,...r})=>r)});
-      status.textContent='Schedule saved. Your current heating mode is retained.';save.disabled=true;
+      status.textContent='Schedule saved. Your current heating mode is retained.';host.dataset.saved='true';save.disabled=true;
     }catch(e){status.textContent=e.message||String(e);save.disabled=false;}
-  });host.append(save,button('Close editor',()=>host.replaceChildren()),status);
+  });host.append(save,button('Close editor',collapse),status);
 }
 export async function costEditor(panel,host,state){
   const hass=panel._hass,config=await hass.callWS({type:'hive_virtual/config',entity_id:state.entity_id}),old=config.cost;
   host.replaceChildren();host.append(node('h3','Gas costs and estimates'));
   host.append(node('p','Use daily sensors for whole-house usage and costs. For learning, choose a cumulative gas meter that updates during heating runs. Gas used for hot water or cooking during those runs can affect the estimate.'));
-  const sensors=[{value:'',label:'Not configured'},...Object.values(hass.states).filter(e=>e.entity_id.startsWith('sensor.')).map(e=>({value:e.entity_id,label:`${e.attributes.friendly_name||e.entity_id} (${e.state} ${e.attributes.unit_of_measurement||''})`}))];
+  const sensors=Object.values(hass.states).filter(e=>e.entity_id.startsWith('sensor.')).map(e=>({value:e.entity_id,label:`${e.attributes.friendly_name||e.entity_id} (${e.state} ${e.attributes.unit_of_measurement||''})`}));
   const controls={};
   for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)',gas_meter_entity:'Cumulative gas meter for learning (kWh, Wh, MWh or m³)'})){
     const options=old[key]&&!sensors.some(s=>s.value===old[key])?[...sensors,{value:old[key],label:`${old[key]} (currently missing)`}]:sensors;
-    const {group,select}=sensorPicker(label,options,old[key]||'');
-    controls[key]=select;host.append(group);
+    const {control,list}=sensorPicker(`${state.entity_id}-${key}`,options,old[key]||'');
+    controls[key]=control;host.append(field(label,control),list);
   }
   for(const[key,label,max]of [['boiler_input_kw','Manual gas input power (kW; 0 leaves the estimate blank until learned)',100],['gas_kwh_per_m3','kWh per m³ conversion (only for a volume sensor; 0 disables conversion)',20]]){
     const c=input('number',old[key]||0);c.min=0;c.max=max;c.step=.01;controls[key]=c;host.append(field(label,c));
@@ -92,6 +90,10 @@ export async function costEditor(panel,host,state){
   host.append(button('Save cost settings',async()=>{
     try{
       const cost={};for(const[key,c]of Object.entries(controls)){
+        if(c.list){
+          c.value=c.value.trim();
+          c.setCustomValidity(!c.value||[...c.list.options].some(option=>option.value===c.value)?'':'Choose a sensor from the suggestions or clear the field.');
+        }
         if(!c.reportValidity())throw Error('Check the highlighted cost settings.');
         if(c.type==='checkbox')cost[key]=c.checked;else if(c.type==='number')cost[key]=Number(c.value);else if(c.value)cost[key]=c.value;
       }

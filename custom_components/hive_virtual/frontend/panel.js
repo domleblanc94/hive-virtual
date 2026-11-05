@@ -13,9 +13,20 @@ class HiveVirtualPanel extends HTMLElement {
       .fault{color:var(--error-color);font-weight:bold}small{display:block;line-height:1.5}.actions{display:flex;flex-wrap:wrap;gap:6px}h1{font-size:22px;margin:0}h2{margin-top:0}
       select{font:inherit;padding:9px;margin:6px;max-width:100%;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);color:var(--primary-text-color)}
       .schedule-row{display:flex;flex-wrap:wrap;align-items:end;border-bottom:1px solid var(--divider-color);padding:12px 0;gap:8px}label{display:inline-flex;flex-direction:column;margin:4px;gap:4px}input[type=checkbox]{width:20px;height:20px}input[type=number]{width:90px}.editor{margin:14px 0}.editor>label{display:flex;max-width:100%}.chart svg{width:100%;height:auto;min-height:65px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0}.metric{background:var(--primary-background-color);padding:15px;border-radius:10px}.metric b{display:block;font-size:22px;margin-top:6px}.history-error{font-size:14px}
-      .thermostat{padding-bottom:16px}.reading{font-size:1.4rem;margin:12px 0}.fault:empty{display:none}.tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px}.tabs button{margin:0}.tabs button[aria-pressed=true],.actions button[aria-pressed=true]{border-color:var(--primary-color);color:var(--primary-color);font-weight:bold}.sensor-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-items:end;border-bottom:1px solid var(--divider-color);padding:8px 0}.sensor-picker input,.sensor-picker select{min-width:0}.controller{margin-bottom:28px}
-      @media(max-width:600px){main{padding:12px}section{padding:16px}.sensor-picker{grid-template-columns:minmax(0,1fr)}}
+      .thermostat{padding-bottom:16px}.reading{font-size:1.4rem;margin:12px 0}.fault:empty{display:none}.tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px}.tabs button{margin:0}.tabs button[aria-pressed=true],.actions button[aria-pressed=true]{border-color:var(--primary-color);color:var(--primary-color);font-weight:bold}.controller{margin-bottom:28px}
+      @media(max-width:600px){main{padding:12px}section{padding:16px}}
       .area-sensors{margin:6px 0 12px;padding-left:1.4em}.area-sensors li{padding:3px 0;overflow-wrap:anywhere}
+      .thermostat-face{display:grid;justify-items:center;gap:10px;margin:12px 0 20px;text-align:center}
+      .dial{display:grid;place-content:center;gap:6px;box-sizing:border-box;width:min(230px,100%);aspect-ratio:1;border:8px solid var(--divider-color);border-radius:50%;background:var(--primary-background-color)}
+      .dial[data-mode=auto],.dial[data-mode=heat]{border-color:var(--primary-color)}
+      .dial[data-heating=true]{border-color:var(--warning-color,#df8800)}
+      .dial-title{font-size:.875rem}.dial .reading{font-size:.9rem;margin:0}
+      .dial-controls{display:flex;align-items:center;justify-content:center;gap:4px}
+      .dial-controls button{font-size:1.4rem;border-radius:50%;width:44px;height:44px;padding:0;margin:0}
+      .dial-controls .target{font-size:2.1rem;width:2.8ch;padding:2px 0;margin:0;border:0;border-radius:4px;text-align:center;background:transparent;appearance:textfield}
+      .dial-controls .target::-webkit-inner-spin-button,.dial-controls .target::-webkit-outer-spin-button{appearance:none;margin:0}
+      .dial-unit{font-size:.9rem}.thermostat-face .actions{justify-content:center}
+      .editor input[list]{min-width:0}
     </style><header><button id="menu" aria-label="Open sidebar">☰</button><img src="/hive_virtual/brand/icon.png" alt=""><h1>Hive Heating</h1></header><main><div id="controllers"></div>
     <p id="error" role="alert"></p></main>`;
     this.shadowRoot.getElementById('menu').onclick = () => this.dispatchEvent(new Event('hass-toggle-menu', {bubbles:true,composed:true}));
@@ -32,9 +43,20 @@ class HiveVirtualPanel extends HTMLElement {
         card = document.createElement('article');
         card.className = 'controller';
         card.innerHTML = `
-          <section class="thermostat"><h2></h2><p class="reading"></p><p class="status"></p><p class="fault"></p>
-            <label>Target °C <input class="target" type="number" min="7" max="30" step="0.5" required></label>
-            <div class="actions"></div><small class="fallback"></small>
+          <section class="thermostat"><h2></h2>
+            <div class="thermostat-face">
+              <div class="dial"><span class="dial-title">Target temperature</span>
+                <div class="dial-controls">
+                  <button class="target-down" aria-label="Lower target temperature">−</button>
+                  <input class="target" type="number" aria-label="Target temperature in degrees Celsius" min="7" max="30" step="0.5" required>
+                  <span class="dial-unit" aria-hidden="true">°C</span>
+                  <button class="target-up" aria-label="Raise target temperature">+</button>
+                </div>
+                <p class="reading"></p>
+              </div>
+              <div class="actions"></div>
+            </div>
+            <p class="status"></p><p class="fault"></p><small class="fallback"></small>
             <div class="sensor-summary" hidden><h3>Active floor sensors</h3><small class="sensor-count"></small><ul class="area-sensors"></ul></div>
           </section>
           <nav class="tabs" aria-label="Heating views">
@@ -44,7 +66,7 @@ class HiveVirtualPanel extends HTMLElement {
           </nav>
           <section data-pane="schedule"><h3>Temperature and area schedule</h3><p class="schedule"></p>
             <small>Choose an area for each period to control when heating switches between upstairs and downstairs. Select Follow schedule to use those periods.</small>
-            <div class="periods"></div><div class="editor"></div>
+            <div class="periods"></div><div class="editor" hidden></div>
             <a href="/config/integrations/integration/hive_virtual">Integration settings and schedule source</a>
           </section>
           <section data-pane="history" hidden><h3>Heating and house temperatures</h3>
@@ -59,9 +81,21 @@ class HiveVirtualPanel extends HTMLElement {
             <small>Heating-only estimates use recorded heating hours, learned or manual gas input power and the current tariff. Whole-house gas may include hot water and cooking. Standing charges are shown separately.</small>
             <div class="editor"></div>
           </section>`;
-        card.querySelector('.target').onchange = ({target}) => {
+        const target = card.querySelector('.target');
+        target.onchange = () => {
           if (target.reportValidity()) this._call('climate','set_temperature',{entity_id:s.entity_id,temperature:target.valueAsNumber});
         };
+        for (const [selector, direction] of [['.target-down', -1], ['.target-up', 1]]) {
+          card.querySelector(selector).onclick = () => {
+            const current = target.valueAsNumber;
+            if (!Number.isFinite(current)) return;
+            const next = Math.min(Number(target.max), Math.max(Number(target.min),
+              Math.round(current / Number(target.step) + direction) * Number(target.step)));
+            if (next === current) return;
+            target.valueAsNumber = next;
+            target.onchange();
+          };
+        }
         for (const tab of card.querySelectorAll('.tabs button')) tab.onclick = () => {
           for (const button of card.querySelectorAll('.tabs button')) button.setAttribute('aria-pressed', button === tab);
           for (const pane of card.querySelectorAll('[data-pane]')) pane.hidden = pane.dataset.pane !== tab.dataset.view;
@@ -78,7 +112,40 @@ class HiveVirtualPanel extends HTMLElement {
           const pane=card.querySelector(`[data-pane="${view}"]`);
           const b=document.createElement('button');b.textContent=label;b.dataset.admin='true';b.disabled=!hass.user?.is_admin;
           const host=pane.querySelector('.editor');
-          b.onclick=()=>editor(this,host,s).catch(e=>this._error(e));host.before(b);
+          if (view === 'schedule') {
+            const periods = pane.querySelector('.periods');
+            host.id = `${s.entity_id}-schedule-editor`;
+            b.setAttribute('aria-controls', host.id);
+            b.setAttribute('aria-expanded', 'false');
+            const collapse = () => {
+              host.hidden = true;
+              periods.hidden = false;
+              b.textContent = label;
+              b.setAttribute('aria-expanded', 'false');
+              b.focus();
+            };
+            let loading = false;
+            b.onclick = async () => {
+              if (!host.hidden) return collapse();
+              host.hidden = false;
+              periods.hidden = true;
+              b.textContent = 'Collapse schedule editor';
+              b.setAttribute('aria-expanded', 'true');
+              if (host.dataset.saved) {
+                host.replaceChildren();
+                delete host.dataset.saved;
+              }
+              if (loading || host.childNodes.length) return;
+              loading = true;
+              try { await editor(this,host,s,collapse); }
+              catch (e) { collapse(); this._error(e); }
+              finally { loading = false; }
+            };
+            periods.before(b);
+          } else {
+            b.onclick=()=>editor(this,host,s).catch(e=>this._error(e));
+            host.before(b);
+          }
         }
         card.querySelector('.range').onchange=()=>this._history(card,s,true);
         card.querySelector('.refresh').onclick=()=>this._history(card,s,true);
@@ -87,7 +154,11 @@ class HiveVirtualPanel extends HTMLElement {
       card.querySelector('h2').textContent=s.attributes.friendly_name || s.entity_id;
       for(const b of card.querySelectorAll('[data-mode]'))b.setAttribute('aria-pressed',b.dataset.mode===s.state);
       for(const b of card.querySelectorAll('button[data-admin]'))b.disabled=!hass.user?.is_admin;
-      card.querySelector('.reading').textContent=`${s.attributes.current_temperature ?? 'Unknown'} °C · ${s.attributes.active_area ?? 'Unknown area'}`;
+      const dial = card.querySelector('.dial');
+      dial.dataset.mode = s.state;
+      dial.dataset.heating = String(s.attributes.hvac_action === 'heating');
+      const room = s.attributes.current_temperature;
+      card.querySelector('.reading').textContent = `${s.attributes.active_area ?? 'Active floor'} · ${room == null ? 'No room reading' : `${room} °C`}`;
       this._sensorStatus(card,s.attributes);
       const statusNames={controlling:'Monitoring room temperature',waiting_for_boost_expiry:'Waiting for boost expiry and cooldown',boost_active:'Hive boost active',boost_active_sensor_fault:'Hive boost active; sensor fault blocks further heating',starting_bounded_boost:'Starting a timed heating request',setting_safe_baseline:'Setting the low fallback temperature',waiting_for_hive_refresh:'Waiting for a fresh Hive update',sensor_fault:'Sensor readings need attention',control_error:'Hive could not be reached',hive_unavailable:'Hive is unavailable'};
       card.querySelector('.status').textContent=`Status: ${statusNames[s.attributes.control_status] || (s.attributes.control_status || 'Starting').replaceAll('_',' ')}`;
