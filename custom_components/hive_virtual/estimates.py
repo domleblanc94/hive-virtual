@@ -1,6 +1,7 @@
 """Explicit, reproducible estimates; no gas-volume or tariff-unit guessing."""
 from math import isfinite
 from statistics import median
+from datetime import datetime
 
 
 def number(value):
@@ -120,3 +121,75 @@ class GasLearning:
 
     def saved(self):
         return {"source": list(self.source), "runs": self.runs} if self.source else None
+
+
+def reported_gas_period(charges):
+    """Read the exact consumption window from a complete set of half-hour rows."""
+    if not isinstance(charges, (list, tuple)) or not 46 <= len(charges) <= 50:
+        return None
+    try:
+        periods = []
+        for row in charges:
+            bounds = tuple(row[key] for key in ("start", "end"))
+            bounds = [value if isinstance(value, datetime) else datetime.fromisoformat(value) for value in bounds]
+            if any(value.utcoffset() is None for value in bounds):
+                return None
+            periods.append(tuple(value.timestamp() for value in bounds))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    periods.sort()
+    start = periods[0][0]
+    if start % 1800 or any(pair != (start + index * 1800, start + (index + 1) * 1800)
+                           for index, pair in enumerate(periods)):
+        return None
+    return int(start), int(periods[-1][1])
+
+
+class DelayedGasLearning:
+    """Match supplier windows to observed heating, keyed by time of consumption."""
+
+    def __init__(self, source=None, saved=None):
+        saved = saved if isinstance(saved, dict) and source and saved.get("source") == list(source) else {}
+        self.source = source
+        self.buckets = saved.get("buckets", {})
+        self.days = saved.get("days", {})
+        self.last = None
+        self.on = None
+
+    def update(self, now, on):
+        cutoff = int(now // 1800) - 48 * 8
+        if self.buckets and int(next(iter(self.buckets))) < cutoff:
+            self.buckets = {key: value for key, value in self.buckets.items() if int(key) >= cutoff}
+        if self.on is not None and on is not None and 0 < now - self.last <= 120:
+            start = self.last
+            while start < now:
+                bucket = int(start // 1800)
+                end = min(now, (bucket + 1) * 1800)
+                covered, heated = self.buckets.get(str(bucket), (0, 0))
+                self.buckets[str(bucket)] = [covered + end - start, heated + (end - start if self.on else 0)]
+                start = end
+        self.last, self.on = now, on
+
+    def match(self, start, end, kwh, now):
+        cutoff = int(now // 1800) - 48 * 8
+        if end > now or start // 1800 < cutoff:
+            return
+        observations = [self.buckets.get(str(bucket), (0, 0)) for bucket in range(start // 1800, end // 1800)]
+        covered = sum(value[0] for value in observations)
+        heated = sum(value[1] for value in observations)
+        if covered < .95 * (end - start) or heated < 3600:
+            return
+        key = str(start)
+        kw = kwh * 3600 / heated
+        if 0 < kw <= 100:
+            self.days[key] = kw
+        else:
+            self.days.pop(key, None)
+        self.days = dict(sorted(self.days.items(), key=lambda item: int(item[0]))[-12:])
+
+    @property
+    def kw(self):
+        return median(self.days.values()) if len(self.days) >= 3 else None
+
+    def saved(self):
+        return {"source": list(self.source), "buckets": self.buckets.copy(), "days": self.days.copy()} if self.source else None

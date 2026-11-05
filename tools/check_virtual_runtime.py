@@ -1,6 +1,7 @@
 """Isolated real-Home-Assistant smoke test; no Hive credentials or real heating."""
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -121,11 +122,12 @@ async def main():
         hass.states.async_set('sensor.gas_cost_trial', '2.75', {'unit_of_measurement': 'GBP'})
         costs = {'gas_energy_today_entity': 'sensor.gas_daily_trial', 'gas_cost_today_entity': 'sensor.gas_cost_trial',
                  'unit_rate_entity': 'sensor.gas_rate_trial', 'rate_in_pence': True, 'boiler_input_kw': 12,
-                 'learn_from_gas_meter': True, 'gas_meter_entity': 'sensor.gas_total_trial'}
+                 'learn_from_gas_meter': True}
         saved = await call_ws('hive_virtual/save', {'entity_id': controller.entity_id, 'revision': page['revision'], 'cost': costs})
         assert saved.get('value', {}).get('saved'), saved
         await hass.async_block_till_done()
         controller._runtime.seconds = 3600
+        assert controller._gas_learning.source[1] == 'sensor.gas_daily_trial'
         assert abs(controller.cost_estimates()['heating_cost'] - .9) < .01
         assert controller.cost_estimates()['household_variable_cost'] == 2.75
         assert controller.cost_estimates()['household_gas_kwh'] == 30
@@ -181,6 +183,15 @@ async def main():
         assert await hass.config_entries.async_setup(entry.entry_id)
         assert entry.runtime_data.extra_state_attributes['learned_gas_kw'] == 20
         assert entry.runtime_data.extra_state_attributes['gas_learning_runs'] == 3
+        controller = entry.runtime_data
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        charges = [{'start': (start + timedelta(minutes=30 * i)).isoformat(),
+                    'end': (start + timedelta(minutes=30 * (i + 1))).isoformat()} for i in range(48)]
+        hass.states.async_set('sensor.edf_trial', '34.954', {'unit_of_measurement': 'kWh', 'charges': charges})
+        config = {**controller.config, 'cost': {**controller.config['cost'], 'gas_reported_entity': 'sensor.edf_trial'}}
+        await controller.async_update_config(config)
+        assert controller.extra_state_attributes['reported_gas']['kwh'] == 34.954
+        assert controller.extra_state_attributes['gas_learning_days'] == 0
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await hass.async_stop()

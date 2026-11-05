@@ -17,15 +17,19 @@ class HiveVirtualPanel extends HTMLElement {
       @media(max-width:600px){main{padding:12px}section{padding:16px}}
       .area-sensors{margin:6px 0 12px;padding-left:1.4em}.area-sensors li{padding:3px 0;overflow-wrap:anywhere}
       .thermostat-face{display:grid;justify-items:center;gap:10px;margin:12px 0 20px;text-align:center}
-      .dial{display:grid;place-content:center;gap:6px;box-sizing:border-box;width:min(230px,100%);aspect-ratio:1;border:8px solid var(--divider-color);border-radius:50%;background:var(--primary-background-color)}
-      .dial[data-mode=auto],.dial[data-mode=heat]{border-color:var(--primary-color)}
-      .dial[data-heating=true]{border-color:var(--warning-color,#df8800)}
-      .dial-title{font-size:.875rem}.dial .reading{font-size:.9rem;margin:0}
-      .dial-controls{display:flex;align-items:center;justify-content:center;gap:4px}
+      .dial{position:relative;width:min(280px,100%);aspect-ratio:240/220;--dial-color:var(--success-color,#4c9b57)}
+      .dial[data-action=heating]{--dial-color:var(--warning-color,#df8800)}
+      .dial-arc{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+      .dial-arc path{fill:none;stroke-width:14;stroke-linecap:round}
+      .dial-track{stroke:var(--divider-color)}.dial-fill{stroke:var(--dial-color)}
+      .dial-thumb{fill:var(--card-background-color);stroke:var(--dial-color);stroke-width:3}
+      .dial-content{position:absolute;inset:25% 0 0;display:flex;flex-direction:column;align-items:center;gap:4px}
+      .dial-state{font-size:.9rem;font-weight:600}.dial .reading{font-size:.9rem;margin:0}
+      .dial-controls{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:5px}
       .dial-controls button{font-size:1.4rem;border-radius:50%;width:44px;height:44px;padding:0;margin:0}
-      .dial-controls .target{font-size:2.1rem;width:2.8ch;padding:2px 0;margin:0;border:0;border-radius:4px;text-align:center;background:transparent;appearance:textfield}
-      .dial-controls .target::-webkit-inner-spin-button,.dial-controls .target::-webkit-outer-spin-button{appearance:none;margin:0}
-      .dial-unit{font-size:.9rem}.thermostat-face .actions{justify-content:center}
+      .dial .target{font-size:clamp(1.9rem,8vw,3.25rem);width:4ch;padding:0;margin:0;border:0;border-radius:4px;text-align:center;background:transparent;appearance:textfield;font-variant-numeric:tabular-nums}
+      .dial .target::-webkit-inner-spin-button,.dial .target::-webkit-outer-spin-button{appearance:none;margin:0}
+      .dial-unit{font-size:.9rem;vertical-align:top;line-height:2.3}.thermostat-face .actions{justify-content:center}
       .editor input[list]{min-width:0}
     </style><header><button id="menu" aria-label="Open sidebar">☰</button><img src="/hive_virtual/brand/icon.png" alt=""><h1>Hive Heating</h1></header><main><div id="controllers"></div>
     <p id="error" role="alert"></p></main>`;
@@ -45,14 +49,21 @@ class HiveVirtualPanel extends HTMLElement {
         card.innerHTML = `
           <section class="thermostat"><h2></h2>
             <div class="thermostat-face">
-              <div class="dial"><span class="dial-title">Target temperature</span>
-                <div class="dial-controls">
-                  <button class="target-down" aria-label="Lower target temperature">−</button>
-                  <input class="target" type="number" aria-label="Target temperature in degrees Celsius" min="7" max="30" step="0.5" required>
-                  <span class="dial-unit" aria-hidden="true">°C</span>
-                  <button class="target-up" aria-label="Raise target temperature">+</button>
+              <div class="dial">
+                <svg class="dial-arc" viewBox="0 0 240 220" aria-hidden="true">
+                  <path class="dial-track" d="M 46.46 193.54 A 104 104 0 1 1 193.54 193.54"></path>
+                  <path class="dial-fill" d="M 46.46 193.54 A 104 104 0 1 1 193.54 193.54" pathLength="100"></path>
+                  <circle class="dial-thumb" r="6"></circle>
+                </svg>
+                <div class="dial-content">
+                  <span class="dial-state"></span>
+                  <div><input class="target" type="number" aria-label="Target temperature in degrees Celsius" min="7" max="30" step="0.5" required><span class="dial-unit" aria-hidden="true">°C</span></div>
+                  <p class="reading"></p>
+                  <div class="dial-controls">
+                    <button class="target-down" aria-label="Lower target temperature">−</button>
+                    <button class="target-up" aria-label="Raise target temperature">+</button>
+                  </div>
                 </div>
-                <p class="reading"></p>
               </div>
               <div class="actions"></div>
             </div>
@@ -83,7 +94,10 @@ class HiveVirtualPanel extends HTMLElement {
           </section>`;
         const target = card.querySelector('.target');
         target.onchange = () => {
-          if (target.reportValidity()) this._call('climate','set_temperature',{entity_id:s.entity_id,temperature:target.valueAsNumber});
+          if (target.reportValidity()) {
+            this._drawTarget(card, target);
+            this._call('climate','set_temperature',{entity_id:s.entity_id,temperature:target.valueAsNumber});
+          }
         };
         for (const [selector, direction] of [['.target-down', -1], ['.target-up', 1]]) {
           card.querySelector(selector).onclick = () => {
@@ -154,9 +168,10 @@ class HiveVirtualPanel extends HTMLElement {
       card.querySelector('h2').textContent=s.attributes.friendly_name || s.entity_id;
       for(const b of card.querySelectorAll('[data-mode]'))b.setAttribute('aria-pressed',b.dataset.mode===s.state);
       for(const b of card.querySelectorAll('button[data-admin]'))b.disabled=!hass.user?.is_admin;
-      const dial = card.querySelector('.dial');
-      dial.dataset.mode = s.state;
-      dial.dataset.heating = String(s.attributes.hvac_action === 'heating');
+      const action = s.attributes.hvac_action;
+      card.querySelector('.dial').dataset.action = action || '';
+      const actionLabels = {heating: 'Heating', idle: 'Idle', off: 'Off'};
+      card.querySelector('.dial-state').textContent = actionLabels[action] || (s.state === 'off' ? 'Off' : 'Monitoring');
       const room = s.attributes.current_temperature;
       card.querySelector('.reading').textContent = `${s.attributes.active_area ?? 'Active floor'} · ${room == null ? 'No room reading' : `${room} °C`}`;
       this._sensorStatus(card,s.attributes);
@@ -164,6 +179,7 @@ class HiveVirtualPanel extends HTMLElement {
       card.querySelector('.status').textContent=`Status: ${statusNames[s.attributes.control_status] || (s.attributes.control_status || 'Starting').replaceAll('_',' ')}`;
       card.querySelector('.fault').textContent=(s.attributes.fault_reason || '').replaceAll('_',' ');
       const input=card.querySelector('.target');if(this.shadowRoot.activeElement!==input)input.value=s.attributes.temperature ?? '';
+      this._drawTarget(card, input);
       card.querySelector('.schedule').textContent=s.attributes.schedule_entity ? `Schedule helper: ${s.attributes.schedule_entity}` : 'Using built-in weekly schedule';
       const periods=card.querySelector('.periods');periods.replaceChildren();
       for(const p of s.attributes.schedule_entity ? [] : (s.attributes.schedule || [])) {
@@ -172,6 +188,19 @@ class HiveVirtualPanel extends HTMLElement {
       this._metrics(card,s);
       if (!card.querySelector('[data-pane="history"]').hidden) this._history(card,s);
     }
+  }
+  _drawTarget(card, input) {
+    const value = input.valueAsNumber;
+    const fill = card.querySelector('.dial-fill');
+    const thumb = card.querySelector('.dial-thumb');
+    const known = Number.isFinite(value);
+    fill.style.visibility = thumb.style.visibility = known ? '' : 'hidden';
+    if (!known) return;
+    const fraction = Math.max(0, Math.min(1, (value - Number(input.min)) / (Number(input.max) - Number(input.min))));
+    fill.setAttribute('stroke-dasharray', `${fraction * 100} 100`);
+    const angle = (135 + fraction * 270) * Math.PI / 180;
+    thumb.setAttribute('cx', 120 + 104 * Math.cos(angle));
+    thumb.setAttribute('cy', 120 + 104 * Math.sin(angle));
   }
   _sensorStatus(card, attributes) {
     const fallback = {
@@ -209,19 +238,27 @@ class HiveVirtualPanel extends HTMLElement {
   _metrics(card,s){
     const values=s.attributes.cost_estimates||{},source=s.attributes.cost_sources||{},currency=s.attributes.currency||'GBP',root=card.querySelector('.metrics');root.replaceChildren();
     const learning = Boolean(source.learn_from_gas_meter);
-    const learned = s.attributes.learned_gas_kw;
-    const runs = s.attributes.gas_learning_runs ?? 0;
+    const delayed = Boolean(source.gas_reported_entity);
+    const reported = s.attributes.reported_gas;
+    const learned = delayed ? s.attributes.delayed_gas_kw : s.attributes.learned_gas_kw;
+    const samples = delayed ? s.attributes.gas_learning_days : s.attributes.gas_learning_runs;
     const metrics = [];
+    if (delayed) {
+      metrics.push([reported ? `Latest reported gas · ${reported.date}` : 'Latest reported gas',
+        reported ? `${reported.kwh.toFixed(2)} kWh` : 'Waiting for a dated reading']);
+    }
     if (learning) {
       metrics.push(['Learned gas input', learned == null ? 'Learning…' : `${learned.toFixed(1)} kW`],
-        ['Heating runs used', String(runs)]);
+        [delayed ? 'Matched days used' : 'Heating runs used', String(samples ?? 0)]);
     }
-    card.querySelector('.learning-basis').textContent = !learning ? '' : learned != null ?
+    card.querySelector('.learning-basis').textContent = delayed && learning ?
+      'Delayed learning needs three matched days with at least 95% Hive activity coverage and one hour of heating each. Whole-house gas can include hot water and cooking.' :
+      !learning ? '' : learned != null ?
       'Heating cost uses the learned median gas input. Hot water and cooking can affect it.' :
       `Learning needs three completed runs with at least three minutes between in-run meter changes. ${source.boiler_input_kw > 0 ? 'Using your manual kW for now.' : 'Heating cost will appear once a rate is learned and a tariff is available.'}`;
     const missing=configured=>configured?'Unavailable':'Not configured';
     const money=(v,configured)=>{if(v===null||v===undefined)return missing(configured);try{return new Intl.NumberFormat(undefined,{style:'currency',currency}).format(v);}catch{return `${v.toFixed(2)} ${currency}`;}};
-    for(const[label,value]of [['Reported heating hours',`${Number(s.attributes.daily_heating_hours||0).toFixed(2)} h`],['Estimated heating-only cost',money(values.heating_cost,(source.boiler_input_kw>0||learning)&&source.unit_rate_entity)],...metrics,['Whole-house gas usage',values.household_gas_kwh==null?missing(source.gas_energy_today_entity):`${values.household_gas_kwh.toFixed(2)} kWh`],['Whole-house gas cost',money(values.household_variable_cost,source.gas_cost_today_entity||(source.gas_energy_today_entity&&source.unit_rate_entity))],['Standing charge (separate)',money(values.standing_charge,source.standing_charge_entity)]]){
+    for(const[label,value]of [['Reported heating hours',`${Number(s.attributes.daily_heating_hours||0).toFixed(2)} h`],[delayed && learning && learned != null ? 'Estimated heating cost (daily gas proxy)' : 'Estimated heating-only cost',money(values.heating_cost,(source.boiler_input_kw>0||learning)&&source.unit_rate_entity)],...metrics,['Whole-house gas usage',values.household_gas_kwh==null?missing(source.gas_energy_today_entity):`${values.household_gas_kwh.toFixed(2)} kWh`],['Whole-house gas cost',money(values.household_variable_cost,source.gas_cost_today_entity||(source.gas_energy_today_entity&&source.unit_rate_entity))],['Standing charge (separate)',money(values.standing_charge,source.standing_charge_entity)]]){
       const e=document.createElement('div');e.className='metric';e.textContent=label;const b=document.createElement('b');b.textContent=value;e.append(b);root.append(e);
     }
     card.querySelector('.cost-basis').textContent=s.attributes.cost_sources?.gas_cost_today_entity?'Household cost is the selected daily cost sensor, as reported; it may already include standing charges.':'Household cost is daily gas usage × the current unit rate, excluding standing charges. Changing tariffs reprice estimates; these are not a bill.';

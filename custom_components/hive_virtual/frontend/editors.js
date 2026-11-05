@@ -71,17 +71,49 @@ export async function scheduleEditor(panel,host,state,collapse){
 export async function costEditor(panel,host,state){
   const hass=panel._hass,config=await hass.callWS({type:'hive_virtual/config',entity_id:state.entity_id}),old=config.cost;
   host.replaceChildren();host.append(node('h3','Gas costs and estimates'));
-  host.append(node('p','Use daily sensors for whole-house usage and costs. For learning, choose a cumulative gas meter that updates during heating runs. Gas used for hot water or cooking during those runs can affect the estimate.'));
+  host.append(node('p','Learning uses Gas usage today by default. Choose a separate meter only if it updates more often during heating runs. Hot water or cooking during a run can affect the estimate.'));
+  host.append(node('small','For EDF’s Previous Accumulative Consumption sensor, use the delayed gas field. With learning enabled, delayed readings take priority over live meter learning.'));
   const sensors=Object.values(hass.states).filter(e=>e.entity_id.startsWith('sensor.')).map(e=>({value:e.entity_id,label:`${e.attributes.friendly_name||e.entity_id} (${e.state} ${e.attributes.unit_of_measurement||''})`}));
   const controls={};
-  for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)',gas_meter_entity:'Cumulative gas meter for learning (kWh, Wh, MWh or m³)'})){
+  for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)',gas_meter_entity:'Separate gas meter for learning (optional)'})){
     const options=old[key]&&!sensors.some(s=>s.value===old[key])?[...sensors,{value:old[key],label:`${old[key]} (currently missing)`}]:sensors;
     const {control,list}=sensorPicker(`${state.entity_id}-${key}`,options,old[key]||'');
+    if (key === 'gas_meter_entity') control.placeholder = 'Leave blank to use Gas usage today';
     controls[key]=control;host.append(field(label,control),list);
   }
   for(const[key,label,max]of [['boiler_input_kw','Manual gas input power (kW; 0 leaves the estimate blank until learned)',100],['gas_kwh_per_m3','kWh per m³ conversion (only for a volume sensor; 0 disables conversion)',20]]){
     const c=input('number',old[key]||0);c.min=0;c.max=max;c.step=.01;controls[key]=c;host.append(field(label,c));
   }
+  const delayed = old.gas_reported_entity || '';
+  const reportedOptions = delayed && !sensors.some(sensor => sensor.value === delayed)
+    ? [...sensors, {value: delayed, label: `${delayed} (currently missing)`}] : sensors;
+  const reported = sensorPicker(`${state.entity_id}-gas_reported_entity`, reportedOptions, delayed);
+  controls.gas_reported_entity = reported.control;
+  host.append(field('Delayed gas usage (EDF Previous Accumulative Consumption)', reported.control), reported.list);
+  const baxi = 'https://www.baxi.co.uk/professional/products/boilers/combi-boilers/baxi-800-combi-2';
+  const worcester = 'https://www.worcester-bosch.co.uk/support/literature/download/6720891161';
+  const vaillant = 'https://professional.vaillant.co.uk/downloads/product-manuals/ecotec-plus-1/ecotec-plus-combi-and-system-installation-instructions-2422739.pdf';
+  const boilers = [
+    ['Baxi 824 Combi 2', 4.9, 20.6, 'gross', baxi],
+    ['Baxi 830 Combi 2', 6, 25.7, 'gross', baxi],
+    ['Baxi 836 Combi 2', 7.2, 25.7, 'gross', baxi],
+    ['Worcester Bosch Greenstar 4000 25/30 Combi (standard natural gas)', 3.2, 24.6, 'net', worcester],
+    ['Vaillant ecoTEC plus 825 (VUW 196/5-5)', 4, 19.6, 'net', vaillant],
+    ['Vaillant ecoTEC plus 832 (VUW 246/5-5)', 5.5, 24.7, 'net', vaillant],
+  ];
+  const preset = choice([{value:'',label:'Choose a model'}, ...boilers.map(([label], index) => ({value:String(index),label}))], '');
+  const reference = node('small');
+  host.append(field('Boiler reference presets (optional)',preset),reference);
+  preset.onchange = () => {
+    reference.replaceChildren();
+    if (!preset.value) return;
+    const [name,min,max,basis,url] = boilers[Number(preset.value)];
+    const kw = ((min + max) / 2).toFixed(2);
+    controls.boiler_input_kw.value = kw;
+    const link = node('a', `${name} specifications`);
+    link.href = url;
+    reference.append(`Published heating input ${min}–${max} kW (${basis}). Filled in the midpoint, ${kw} kW, as an editable estimate. `, link);
+  };
   controls.currency=input('text',old.currency||'GBP');controls.currency.pattern='[A-Z]{3}';host.append(field('Currency code (GBP, EUR, etc.)',controls.currency));
   for(const[key,label]of [['rate_in_pence','Unit-rate sensor uses pence/cents per kWh (divide by 100)'],['cost_in_pence','Cost and standing-charge sensors use pence/cents (divide by 100)'],['learn_from_gas_meter','Learn from gas meter']]){
     const c=input('checkbox','');c.checked=!!old[key];controls[key]=c;host.append(field(label,c));

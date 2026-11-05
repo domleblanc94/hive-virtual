@@ -1,5 +1,6 @@
 """Units, midnight, unknown gaps and cost attribution boundaries."""
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
 import unittest
 
@@ -9,6 +10,28 @@ spec.loader.exec_module(model)
 
 
 class EstimateTests(unittest.TestCase):
+    def test_delayed_gas_uses_exact_window_and_one_sample_per_day(self):
+        source = ("climate.hive", "sensor.edf", 0)
+        learning = model.DelayedGasLearning(source)
+        # Use 23-hour days to exercise matching the supplied window length.
+        for index in range(3):
+            start = index * 86400
+            end = start + 46 * 1800
+            charges = [{"start": datetime.fromtimestamp(at, timezone.utc).isoformat(),
+                        "end": datetime.fromtimestamp(at + 1800, timezone.utc).isoformat()}
+                       for at in range(start, end, 1800)]
+            self.assertEqual(model.reported_gas_period(charges), (start, end))
+            self.assertIsNone(model.reported_gas_period(charges[:-1]))
+            learning.match(start, end, 24, end)
+            self.assertNotIn(str(start), learning.days)
+            for now in range(start, end + 1, 60):
+                learning.update(now, now < start + 7200)
+            learning.match(start, end, 24, end + 86400)
+            learning.match(start, end, 24, end + 86400)
+            self.assertEqual(len(learning.days), index + 1)
+        self.assertEqual(learning.kw, 12)
+        self.assertEqual(model.DelayedGasLearning(source, learning.saved()).kw, 12)
+
     def test_learning_uses_complete_runs_and_restores_only_matching_meter(self):
         source = ("climate.hive", "sensor.gas", 0)
         learning = model.GasLearning(source)

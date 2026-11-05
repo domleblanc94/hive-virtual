@@ -49,9 +49,13 @@ Use a **daily** usage sensor, such as your gas provider's gas consumption today,
 
 Select whether the tariff is in major currency per kWh (for example GBP/kWh) or pence/cents per kWh (divide by 100). A second checkbox applies independently to the daily-cost and standing-charge sensors. These are explicit input settings, not automatic currency conversion. Configure the matching three-letter currency code.
 
-**Heating-only estimate = reported heating hours × average gas input in kW × current unit rate.** In **Gas & costs → Configure costs**, enable **Learn from gas meter** and select a cumulative gas meter that updates during heating runs. Keep the separate daily usage sensor for whole-house totals. A meter reporting m³ still requires your supplier’s conversion factor.
+**Heating-only estimate = reported heating hours × average gas input in kW × current unit rate.** In **Gas & costs → Configure costs**, enable **Learn from gas meter** to use **Gas usage today** for both learning and whole-house totals. The sensor must update during heating runs. If your daily sensor updates less frequently than a separate cumulative meter, select that meter as the optional learning source. A meter reporting m³ still requires your supplier’s conversion factor.
 
 Learning takes the median of up to 12 completed runs, starting once three qualify. Each run needs two changed meter readings at least three minutes apart while Hive reports heating. Runs with gaps in heating reports, unavailable meter readings, or a meter reset are discarded. Samples are saved across restarts. The page shows the learned kW and sample count. While learning, the estimate uses the manual kW if configured. Hot water, cooking, boiler modulation and meter reporting delays can affect the learned estimate. The current tariff reprices the day’s estimate.
+
+For EDF, select **Previous Accumulative Consumption (kWh)** in **Delayed gas usage**. The page shows the latest complete period and its consumption date, taken from EDF’s timestamped readings. With learning enabled, Hive matches each supplier window to heating activity observed after setup. It uses the median of up to 12 matched days, starting at three. A day needs at least 95% observed activity and one hour of reported heating. This is a whole-house gas proxy and may overestimate heating due to hot water or cooking.
+
+**Boiler reference presets** fill in an editable manual estimate from the midpoint of a published central-heating input range. This is a starting assumption. Actual gas input varies with boiler modulation and the installation.
 
 Whole-house gas cost is either the selected daily cost sensor, exactly as reported, or daily energy × current rate. It can include hot water/cooking. A daily cost sensor may already include standing charges, so the standing charge is always shown separately and is never automatically added. The heating-only estimate and household spend must not be added together.
 
