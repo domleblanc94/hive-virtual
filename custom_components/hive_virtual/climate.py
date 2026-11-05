@@ -286,6 +286,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
 
     def _safety_data(self):
         return {"fault": self._latched_fault,
+                "hvac_mode": self.hvac_mode,
+                "target_temperature": self.target_temperature,
                 "runtime": self._runtime.saved(),
                 "gas_learning": self._gas_learning.saved(),
                 "delayed_gas": self._delayed_gas.saved(),
@@ -300,10 +302,11 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         data = self._safety_data()
         if data == self._saved:
             return True
-        # Faults and request reservations are immediate. Sample unchanged
-        # temperature history at most every five minutes to limit disk writes.
+        # Save mode changes and other important transitions immediately.
+        # Throttle routine temperature and runtime snapshots.
         if not force and self._saved and self._last_saved_at and (dt_util.utcnow() - self._last_saved_at).total_seconds() < 300:
-            if all(data[key] == self._saved.get(key) for key in ("fault", "pending_until", "gas_learning")):
+            immediate = ("fault", "pending_until", "gas_learning", "hvac_mode", "target_temperature")
+            if all(data[key] == self._saved.get(key) for key in immediate):
                 return True
         try:
             await self._store.async_save(data)
@@ -378,14 +381,15 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         except Exception:
             self._storage_fault = True
             _LOGGER.exception("Could not load virtual thermostat safety state")
-        if old := await self.async_get_last_state():
-            # Restoring a target is safe; enabling heat requires an explicit action.
-            try:
-                target = float(old.attributes[ATTR_TEMPERATURE])
-                if 7 <= target <= 30:
-                    self._attr_target_temperature = target
-            except (KeyError, ValueError, TypeError):
-                pass
+        if not self._storage_fault:
+            old = await self.async_get_last_state() if "hvac_mode" not in saved else None
+            mode = old.state if old else saved.get("hvac_mode")
+            target = number(old.attributes.get(ATTR_TEMPERATURE) if old else saved.get("target_temperature"))
+            valid_target = target is not None and 7 <= target <= 30
+            if valid_target:
+                self._attr_target_temperature = target
+            if (mode == HVACMode.AUTO and self._has_schedule()) or (mode == HVACMode.HEAT and valid_target):
+                self._attr_hvac_mode = mode
         self._watch()
         self.async_on_remove(async_track_time_interval(self.hass, self._tick, timedelta(seconds=30)))
         await self._reconcile()
@@ -716,10 +720,13 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
     async def async_set_hvac_mode(self, hvac_mode):
         if hvac_mode not in self.hvac_modes:
             raise ValueError("Only auto, heat and off are supported")
-        if hvac_mode == HVACMode.AUTO and not self.config["schedule"] and not self.config.get("schedule_entity"):
+        if hvac_mode == HVACMode.AUTO and not self._has_schedule():
             raise ValueError("Configure a schedule before selecting Auto")
         self._attr_hvac_mode = hvac_mode
         await self._reconcile()
+
+    def _has_schedule(self):
+        return bool(self.config["schedule"] or self.config.get("schedule_entity"))
 
     async def async_turn_on(self):
         await self.async_set_hvac_mode(HVACMode.HEAT)

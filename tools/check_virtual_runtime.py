@@ -61,9 +61,11 @@ async def main():
         controller = entry.runtime_data
         assert controller._latched_fault
         assert controller._pending_until == deadline
-        assert controller.hvac_mode == 'off'
+        assert controller.hvac_mode == 'heat'
+        assert len(calls) == 1
         assert 'hive-virtual-heating' in hass.data[DATA_PANELS]
         hass.states.async_set('sensor.down_trial', '18', {'unit_of_measurement': '°C'})
+        await controller.async_turn_off()
         await controller.async_reset_fault()
         assert not controller._latched_fault
         hass.states.async_set('schedule.heating_trial', 'on', {'temperature': 21, 'area': 'Upstairs'})
@@ -181,6 +183,7 @@ async def main():
                           'learned_gas_cost': True}))
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert await hass.config_entries.async_setup(entry.entry_id)
+        assert entry.runtime_data.hvac_mode == 'auto'
         assert entry.runtime_data.extra_state_attributes['learned_gas_kw'] == 20
         assert entry.runtime_data.extra_state_attributes['gas_learning_runs'] == 3
         controller = entry.runtime_data

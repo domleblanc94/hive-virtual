@@ -21,7 +21,7 @@ Your configured sensors, entity IDs, integration options and fault/request state
 3. Find Hive Virtual Thermostat and download its published release. HACS needs to perform this download once before it can track a previously manual installation.
 4. Restart Home Assistant fully, then refresh the browser.
 5. Open the existing integration's Configure options. Check the sensor selections, schedule source and built-in periods or native helper reference.
-6. Select Auto when ready to resume scheduled heating. Full Home Assistant restarts start the thermostat Off by design.
+6. Check the restored mode. If the thermostat was already Off, select Auto when ready to resume scheduled heating.
 
 Do not add another virtual thermostat for the same Hive zone. If you already use YAML, retain that configuration block. The initial migration changes file management, not your chosen configuration method.
 

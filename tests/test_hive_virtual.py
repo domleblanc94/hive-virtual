@@ -471,10 +471,32 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         restarted._notify = Mock()
         await restarted.async_added_to_hass()
         self.assertEqual(restarted._pending_until, saved_deadline)
-        self.assertEqual(restarted.hvac_mode, "off")
+        self.assertEqual(restarted.hvac_mode, "heat")
         self.call.reset_mock()
         await restarted.async_turn_on()
         self.call.assert_not_called()
+
+    async def test_startup_restores_legacy_auto_and_prefers_saved_off(self):
+        self.entity.config["schedule"] = [{"time": "00:00", "temperature": 21, "area": "Downstairs"}]
+        legacy = AsyncMock(return_value=state("auto", temperature=19))
+        self.entity.async_get_last_state = legacy
+        await self.entity.async_added_to_hass()
+        self.assertEqual(self.entity.hvac_mode, "auto")
+        self.assertEqual(self.entity.target_temperature, 21)
+        await self.entity.async_turn_off()
+        await self.entity.async_set_temperature(temperature=19.5)
+
+        restarted = climate.HiveVirtual(self.entity.config)
+        restarted.hass = self.entity.hass
+        restarted.entity_id = self.entity.entity_id
+        restarted._notify = Mock()
+        restarted.async_get_last_state = legacy
+        self.call.reset_mock()
+        await restarted.async_added_to_hass()
+        self.assertEqual(restarted.hvac_mode, "off")
+        self.assertEqual(restarted.target_temperature, 19.5)
+        self.call.assert_not_called()
+        legacy.assert_awaited_once()
 
     async def test_latched_fault_survives_restart_and_enabling_heat(self):
         await self.entity.async_added_to_hass()

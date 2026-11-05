@@ -33,7 +33,7 @@
     "step": {
       "init": {
         "title": "Hive Virtual Thermostat settings",
-        "description": "Changes apply to the running thermostat without switching it Off. Fault latches and request cooldowns are retained. A full Home Assistant restart still starts Off.",
+        "description": "Changes apply to the running thermostat without switching it Off. Fault latches and request cooldowns are retained. Home Assistant restarts restore the previous mode and manual target.",
         "menu_options": {
           "sensors": "Temperature sensors",
           "schedule": "Weekly temperature schedule",

@@ -16,7 +16,7 @@ Built by [domleblanc94](https://github.com/domleblanc94) with [OpenAI Codex](htt
 4. Restart Home Assistant and refresh your browser.
 5. If not already configured, add **Hive Virtual Thermostat** under **Settings → Devices & services**.
 
-For an existing manual installation, back up Home Assistant first, then let HACS manage the same hive_virtual folder. Keep the existing configured entry; do not add a second controller. HACS offers future GitHub releases as updates. After installing each update, restart Home Assistant and select Auto/Heat when ready: full restarts start the thermostat Off.
+For an existing manual installation, back up Home Assistant first, then let HACS manage the same hive_virtual folder. Keep the existing configured entry; do not add a second controller. HACS offers future GitHub releases as updates. After installing an update, restart Home Assistant to load it.
 
 This is a HACS **custom repository**, not a claim of inclusion in the default HACS catalogue.
 
@@ -36,7 +36,7 @@ With that option disabled, Home Assistant sets a **Fixed fallback target** of 7�
 
 Thermostat controls stay above the **Schedule**, **History**, and **Gas & costs** tabs. In **Schedule → Edit schedule**, set **Start** and **Area** for each period to choose when control switches floors. Select **Follow schedule** on the thermostat. Each gas sensor field supports search by name or entity ID.
 
-After updating through HACS, restart Home Assistant and refresh the browser. Select **Auto** again when ready (a full restart still starts Off). Existing settings, schedules, faults and pending request deadlines are retained.
+After updating through HACS, restart Home Assistant and refresh the browser. The thermostat restores its previous mode and manual target. Existing settings, schedules, faults and pending request deadlines are retained.
 
 - **Edit schedule:** change built-in weekly periods directly on the heating page. If you use a native Schedule helper, the same button edits that helper's blocks, including start/end, target, area and days. Native YAML-defined helpers remain read-only here. Other custom block data is preserved. Invalid periods/overlaps are rejected; stale editor revisions are rejected for integration settings, with a best-effort change check for native helpers.
 - **Heating history:** an on/off/unavailable timeline based on Hive's reported heating action, including manual boosts. It is not inferred from the virtual thermostat's requested demand. Missing or stale Hive reports remain unavailable.
@@ -69,7 +69,7 @@ A community Home Assistant integration that controls one Hive heating zone from 
 
 - Hive Heating is registered automatically in the sidebar for UI-configured controllers. No dashboard YAML is needed; older manually created dashboards can be removed separately to avoid duplicate titles.
 - Native Schedule helpers are supported for graphical weekly editing. The existing built-in weekly schedule remains available for backwards compatibility.
-- Saving settings updates the running controller in place and retains Auto/Heat/Off, pending request deadlines, sensor references and serious fault latches. A full Home Assistant restart still starts Off.
+- Saving settings updates the running controller in place and retains Auto/Heat/Off, pending request deadlines, sensor references and serious fault latches. The previous mode and manual target also survive a Home Assistant restart.
 - Pending boosts are saved BEFORE the cloud request. Fault latches and sensor references are retained in Home Assistant storage. Storage failures block new requests.
 - A problem binary sensor, Reset heating fault button and optional persistent fault notifications are added. Notifications change only when the fault changes; they are not repeated on each poll. The problem sensor can drive your own phone-notification automation.
 - Configurable pause between requests (default 2 minutes), including a pause after an observed Hive boost ends. Active boosts are never renewed or cancelled.
@@ -109,7 +109,7 @@ The helper's block controls both area and target. An uncovered time block means 
 
 Configure → Weekly temperature schedule still supports adding, editing and deleting periods with start time, target, area and weekdays. Each period applies until the next matching period, including overnight/week wrap. Default setup creates daily examples: 06:30 downstairs 20°C; 08:30 downstairs 17°C; 17:00 downstairs 20.5°C; 22:00 upstairs 18°C. These are examples, not an import of your old schedule.
 
-Auto follows the selected schedule. Adjusting a target while in Auto selects manual Heat until you choose Auto again. Heat uses the default feedback area (or `active_area_entity` for advanced YAML setups). Off prevents new heating requests. A complete HA restart starts Off; choose Auto/Heat again when appropriate. Settings edits no longer force Off. Deleting every built-in period without selecting a helper leaves no usable Auto schedule.
+Auto follows the selected schedule. Adjusting a target while in Auto selects manual Heat until you choose Auto again. Heat uses the default feedback area (or `active_area_entity` for advanced YAML setups). Off prevents new heating requests. On restart, the thermostat restores its previous mode and manual target. Fresh Hive reports and the usual safety checks are still required before requesting heating. A new installation starts Off. Deleting every built-in period without selecting a helper leaves no usable Auto schedule.
 
 ## Heating requests and offline behaviour
 
@@ -169,7 +169,7 @@ On your system:
 2. Power off Home Assistant mid-boost. Confirm Hive ends that timed boost and returns to the selected fallback mode and target. Observe actual boiler demand. Do not rely on the failsafe until this passes.
 3. With HA running, extend/start a manual Hive boost, change virtual targets and select Off. Confirm no early cancellation. Cancel in Hive when desired.
 4. In a test setup, inject an out-of-range/suddenly low reading. Confirm the problem sensor/notification and that no further boosts start. Restart HA and verify the fault remains. Correct the sensor, use Off → Reset fault → Auto/Heat.
-5. Edit a native schedule block and an integration setting. Confirm the running mode and pending cooldown are retained. Check a midnight area change, helper gaps and Off after a full restart.
+5. Edit a native schedule block and an integration setting. Confirm the running mode and pending cooldown are retained. Check a midnight area change, helper gaps and verify that the previous mode is restored after a full restart.
 
 Do not remove/edit Home Assistant's private safety-storage files to bypass a fault or cooldown. External automations, Hive radiator Heat On Demand, other users or app commands can change the baseline and undermine the controller's fallback. Restore your desired Hive native mode/schedule yourself after disabling/removing this integration.
 
