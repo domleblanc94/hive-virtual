@@ -20,6 +20,33 @@ function sensorPicker(id, options, selected) {
   control.oninput = () => control.setCustomValidity('');
   return {control, list};
 }
+
+const moneyUnits = new Set([...Intl.supportedValuesOf('currency').map(code => code.toLowerCase()),
+  'p', 'c', 'pence', 'cents', '£', '€', '$', '¢']);
+
+function costSensorOptions(sensors, key, selected) {
+  const energyFields = ['gas_energy_today_entity', 'gas_meter_entity', 'gas_reported_entity'];
+  return sensors.flatMap(({entity_id: value, state, attributes}) => {
+    const unit = attributes.unit_of_measurement || '';
+    const normalized = unit.toLowerCase().replace(/\s/g, '');
+    const charges = attributes.charges;
+    const dated = Array.isArray(charges) && charges.length >= 46 && charges.length <= 50 &&
+      charges.every(row => row?.start && row?.end);
+    let matches;
+    if (energyFields.includes(key)) {
+      matches = ['kWh', 'Wh', 'MWh', 'm³', 'm3'].includes(unit) &&
+        (key === 'gas_reported_entity' ? dated : !dated);
+    } else {
+      const [currency, per, ...extra] = normalized.split('/');
+      matches = !extra.length && moneyUnits.has(currency) &&
+        (key === 'unit_rate_entity' ? per === 'kwh' : [undefined, 'day', 'd'].includes(per));
+      if (key === 'gas_cost_today_entity' && dated) matches = false;
+    }
+    if (!matches && value !== selected) return [];
+    const label = `${attributes.friendly_name || value} (${state} ${unit})${matches ? '' : ' · currently selected'}`;
+    return [{value, label}];
+  });
+}
 export function nativeRows(item){return DAYS.flatMap((day,i)=>(item[day]||[]).map(block=>({time:block.from.slice(0,5),end:block.to.slice(0,5),temperature:block.data?.temperature,area:block.data?.area,days:[i],extra:{...block.data}})));}
 export function nativePayload(rows,item){
   const result={type:'schedule/update',schedule_id:item.id,name:item.name};if(item.icon)result.icon=item.icon;
@@ -72,27 +99,26 @@ export async function costEditor(panel,host,state){
   const hass=panel._hass,config=await hass.callWS({type:'hive_virtual/config',entity_id:state.entity_id}),old=config.cost;
   host.replaceChildren();host.append(node('h3','Gas costs and estimates'));
   host.append(node('p','Learning uses Gas usage today by default. Choose a separate meter only if it updates more often during heating runs. Hot water or cooking during a run can affect the estimate.'));
-  host.append(node('small','For EDF’s Previous Accumulative Consumption sensor, use the delayed gas field. With learning enabled, delayed readings take priority over live meter learning.'));
-  const sensors=Object.values(hass.states).filter(e=>e.entity_id.startsWith('sensor.')).map(e=>({value:e.entity_id,label:`${e.attributes.friendly_name||e.entity_id} (${e.state} ${e.attributes.unit_of_measurement||''})`}));
+  host.append(node('small','Use the delayed gas field for a daily total with timestamped half-hour readings. With learning enabled, delayed readings take priority over live meter learning.'));
+  const sensors=Object.values(hass.states).filter(e=>e.entity_id.startsWith('sensor.'));
   const controls={};
-  for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)',gas_meter_entity:'Separate gas meter for learning (optional)'})){
-    const options=old[key]&&!sensors.some(s=>s.value===old[key])?[...sensors,{value:old[key],label:`${old[key]} (currently missing)`}]:sensors;
-    const {control,list}=sensorPicker(`${state.entity_id}-${key}`,options,old[key]||'');
+  for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)',gas_meter_entity:'Separate gas meter for learning (optional)',gas_reported_entity:'Delayed daily gas usage (optional)'})){
+    const selected = old[key] || '';
+    const options = costSensorOptions(sensors, key, selected);
+    if (selected && !options.some(option => option.value === selected)) {
+      options.push({value:selected, label:`${selected} (currently missing)`});
+    }
+    const {control,list}=sensorPicker(`${state.entity_id}-${key}`,options,selected);
     if (key === 'gas_meter_entity') control.placeholder = 'Leave blank to use Gas usage today';
     controls[key]=control;host.append(field(label,control),list);
   }
   for(const[key,label,max]of [['boiler_input_kw','Manual gas input power (kW; 0 leaves the estimate blank until learned)',100],['gas_kwh_per_m3','kWh per m³ conversion (only for a volume sensor; 0 disables conversion)',20]]){
     const c=input('number',old[key]||0);c.min=0;c.max=max;c.step=.01;controls[key]=c;host.append(field(label,c));
   }
-  const delayed = old.gas_reported_entity || '';
-  const reportedOptions = delayed && !sensors.some(sensor => sensor.value === delayed)
-    ? [...sensors, {value: delayed, label: `${delayed} (currently missing)`}] : sensors;
-  const reported = sensorPicker(`${state.entity_id}-gas_reported_entity`, reportedOptions, delayed);
-  controls.gas_reported_entity = reported.control;
-  host.append(field('Delayed gas usage (EDF Previous Accumulative Consumption)', reported.control), reported.list);
   const baxi = 'https://www.baxi.co.uk/professional/products/boilers/combi-boilers/baxi-800-combi-2';
   const worcester = 'https://www.worcester-bosch.co.uk/support/literature/download/6720891161';
   const vaillant = 'https://professional.vaillant.co.uk/downloads/product-manuals/ecotec-plus-1/ecotec-plus-combi-and-system-installation-instructions-2422739.pdf';
+  const glowWorm = 'https://www.glow-worm.co.uk/glow-worm/product-manuals/energy-3/combi-8/energy7-combi-installation-and-maintenance-instructions-1948938.pdf';
   const boilers = [
     ['Baxi 824 Combi 2', 4.9, 20.6, 'gross', baxi],
     ['Baxi 830 Combi 2', 6, 25.7, 'gross', baxi],
@@ -100,6 +126,9 @@ export async function costEditor(panel,host,state){
     ['Worcester Bosch Greenstar 4000 25/30 Combi (standard natural gas)', 3.2, 24.6, 'net', worcester],
     ['Vaillant ecoTEC plus 825 (VUW 196/5-5)', 4, 19.6, 'net', vaillant],
     ['Vaillant ecoTEC plus 832 (VUW 246/5-5)', 5.5, 24.7, 'net', vaillant],
+    ['Glow-worm Energy7 25c', 5.1, 18.4, '', glowWorm],
+    ['Glow-worm Energy7 30c', 6.1, 25.5, '', glowWorm],
+    ['Glow-worm Energy7 35c', 7.2, 25.7, '', glowWorm],
   ];
   const preset = choice([{value:'',label:'Choose a model'}, ...boilers.map(([label], index) => ({value:String(index),label}))], '');
   const reference = node('small');
@@ -112,7 +141,8 @@ export async function costEditor(panel,host,state){
     controls.boiler_input_kw.value = kw;
     const link = node('a', `${name} specifications`);
     link.href = url;
-    reference.append(`Published heating input ${min}–${max} kW (${basis}). Filled in the midpoint, ${kw} kW, as an editable estimate. `, link);
+    const rating = basis ? ` (${basis})` : '';
+    reference.append(`Published heating input ${min}–${max} kW${rating}. Filled in the midpoint, ${kw} kW, as an editable estimate. `, link);
   };
   controls.currency=input('text',old.currency||'GBP');controls.currency.pattern='[A-Z]{3}';host.append(field('Currency code (GBP, EUR, etc.)',controls.currency));
   for(const[key,label]of [['rate_in_pence','Unit-rate sensor uses pence/cents per kWh (divide by 100)'],['cost_in_pence','Cost and standing-charge sensors use pence/cents (divide by 100)'],['learn_from_gas_meter','Learn from gas meter']]){
