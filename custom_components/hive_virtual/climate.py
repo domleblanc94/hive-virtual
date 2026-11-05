@@ -52,6 +52,7 @@ CONFIG_SCHEMA = vol.Schema({
     vol.Optional("sensor_timeout", default=120): vol.All(vol.Coerce(int), vol.Range(min=1)),
     vol.Optional("use_sensor_availability", default=False): cv.boolean,
     vol.Optional("allow_partial_area", default=False): cv.boolean,
+    vol.Optional("minimum_area_sensors", default={}): {cv.string: vol.All(vol.Coerce(int), vol.Range(min=1))},
     vol.Optional("boost_minutes", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=15)),
     vol.Optional("sensor_min", default=5): vol.All(vol.Coerce(float), vol.Range(min=-10, max=30)),
     vol.Optional("sensor_max", default=35): vol.All(vol.Coerce(float), vol.Range(min=10, max=50)),
@@ -89,6 +90,9 @@ def validate_config(config):
         raise vol.Invalid("At least one temperature area is required")
     if config.get("default_area", next(iter(config["areas"]))) not in config["areas"]:
         raise vol.Invalid("default_area must name a configured area")
+    for area, minimum in config["minimum_area_sensors"].items():
+        if minimum > len(set(config["areas"].get(area, []))):
+            raise vol.Invalid("invalid_sensor_minimum", path=["minimum_area_sensors", area])
     if not config["preserve_hive_settings"] and config["idle_temperature"] >= config["call_temperature"]:
         raise vol.Invalid("fallback_not_lower", path=["idle_temperature"])
     if not config["hive_entity"].startswith("climate."):
@@ -133,6 +137,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self._lock = asyncio.Lock()
         self._status = "starting"
         self._area = None
+        self._area_sensors = {}
+        self._hive_fallback_status = None
         self._attr_current_temperature = None
         self._guard = SensorGuard()
         self._fault = None
@@ -148,6 +154,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self._unwatch = None
         self._removed = False
         self._notice = None
+        self._sensor_notice = {}
         self._tasks = set()
         self._was_boosting = False
         self._runtime = DailyRuntime()
@@ -167,7 +174,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
 
     def area_temperature(self, area):
         values = []
-        for entity in self.config["areas"][area]:
+        for entity in dict.fromkeys(self.config["areas"][area]):
             state = self.hass.states.get(entity)
             if fault := self._sensor_state_fault(state):
                 if fault == "sensor_unavailable" and self.config.get("allow_partial_area", False):
@@ -181,7 +188,14 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             if not self.config["sensor_min"] <= value <= self.config["sensor_max"]:
                 return None
             values.append(value)
-        return average(values)
+        return average(values) if len(values) >= self.minimum_sensors(area) else None
+
+    def minimum_sensors(self, area):
+        return self.config.get("minimum_area_sensors", {}).get(area, 1)
+
+    @property
+    def sensor_fallback_status(self):
+        return self._hive_fallback_status
 
     def cost_estimates(self):
         config = self.config["cost"]
@@ -336,6 +350,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
 
     def _read_temperature(self):
         areas = self.config["areas"]
+        self._area_sensors = {}
         self._area = self.config.get("default_area", next(iter(areas)))
         if self._slot:
             self._area = self._slot["area"]
@@ -346,13 +361,14 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             self._fault = "invalid_area"
             return None
         values = {}
+        blocking_fault = None
         for entity_id in areas[self._area]:
             state = self.hass.states.get(entity_id)
             if fault := self._sensor_state_fault(state):
-                if fault == "sensor_unavailable" and self.config.get("allow_partial_area", False):
-                    continue
-                self._fault = f"{fault}:{entity_id}"
-                return None
+                self._area_sensors[entity_id] = {"status": fault}
+                if fault != "sensor_unavailable" or not self.config.get("allow_partial_area", False):
+                    blocking_fault = blocking_fault or f"{fault}:{entity_id}"
+                continue
             if report_entity := self.config["sensor_report_entities"].get(entity_id):
                 report = self.hass.states.get(report_entity)
                 try:
@@ -361,14 +377,20 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                     timestamp = None
                 age = (dt_util.utcnow() - timestamp).total_seconds() if timestamp and timestamp.tzinfo else None
                 if age is None or not 0 <= age <= self.config["sensor_timeout"] * 60:
-                    self._fault = f"device_report_stale:{entity_id}"
-                    return None
+                    self._area_sensors[entity_id] = {"status": "device_report_stale"}
+                    blocking_fault = blocking_fault or f"device_report_stale:{entity_id}"
+                    continue
             value = average([state.state])
             unit = state.attributes.get("unit_of_measurement")
             if value is None or unit not in ("°C", "°F"):
-                self._fault = f"invalid_reading:{entity_id}"
-                return None
+                self._area_sensors[entity_id] = {"status": "invalid_reading"}
+                blocking_fault = blocking_fault or f"invalid_reading:{entity_id}"
+                continue
             values[entity_id] = TemperatureConverter.convert(value, unit, UnitOfTemperature.CELSIUS)
+            self._area_sensors[entity_id] = {"status": "excluded", "temperature": values[entity_id]}
+        if blocking_fault:
+            self._fault = blocking_fault
+            return None
         if not values:
             self._fault = f"no_available_sensors:{self._area}"
             return None
@@ -383,7 +405,28 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         if max(values.values()) >= self.config["high_temperature_cutoff"]:
             self._latched_fault = self._fault = "high_temperature_cutoff"
             return None
+        if len(values) < self.minimum_sensors(self._area):
+            self._fault = f"too_few_sensors:{self._area}"
+            return None
+        for entity_id in values:
+            self._area_sensors[entity_id]["status"] = "used"
         return average(values.values())
+
+    def _sensor_fallback_status(self, hive, fresh):
+        if self.current_temperature is not None or self.hvac_mode == HVACMode.OFF:
+            return None
+        if not fresh or hive.state in ("unknown", "unavailable"):
+            return "unconfirmed"
+        if hive.attributes.get("preset_mode") == "boost":
+            return "boost_active"
+        if hive.attributes.get("preset_mode") != "none":
+            return "unconfirmed"
+        if self.config.get("preserve_hive_settings"):
+            return "hive_settings"
+        unit = hive.attributes.get("temperature_unit", self.hass.config.units.temperature_unit)
+        if unit == "°C" and hive.state == HVACMode.HEAT and hive.attributes.get("temperature") == self.config["idle_temperature"]:
+            return "fixed_target"
+        return "unconfirmed"
 
     async def _reconcile(self):
         async with self._lock:
@@ -423,6 +466,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             if hive and hive.state not in ("unknown", "unavailable"):
                 self._was_boosting = boosting
             fresh = hive and 0 <= (dt_util.utcnow() - hive.last_reported).total_seconds() <= 120
+            self._hive_fallback_status = self._sensor_fallback_status(hive, fresh)
             action = hive.attributes.get("hvac_action") if fresh and hive.state not in ("unknown", "unavailable") else None
             on = True if action == "heating" else False if action in ("idle", "off") else None
             now, local = dt_util.utcnow(), dt_util.now()
@@ -453,15 +497,46 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         if not self._store:
             return
         from homeassistant.components import persistent_notification
-        message = self.fault_message if self.config["notifications"] else None
-        if message == self._notice:
+        fault = self.fault_message
+        alert = None
+        if self.config["notifications"]:
+            previous = self._sensor_notice.get(self._area)
+            if self.sensor_fallback_status:
+                self._sensor_notice[self._area] = "fallback"
+                detail = {
+                    "boost_active": "Waiting for the active Hive boost to end.",
+                    "hive_settings": "Hive is using its own mode and target.",
+                    "fixed_target": "Hive is using the fixed fallback target.",
+                    "unconfirmed": "Hive fallback could not be confirmed.",
+                }[self.sensor_fallback_status]
+                alert = ("sensor", f"{self._area}: sensor control paused. {detail} Reason: {fault}.")
+            elif fault:
+                alert = ("fault", f"{fault}. New heating requests are blocked. Check Hive Heating and the sensors. Active Hive boosts are left to expire.")
+            elif self.hvac_mode != HVACMode.OFF and self.current_temperature is not None:
+                used = sum(reading["status"] == "used" for reading in self._area_sensors.values())
+                if used == 1 and len(self._area_sensors) > 1:
+                    recovered = previous in ("fallback", "single_recovery")
+                    self._sensor_notice[self._area] = "single_recovery" if recovered else "single"
+                    if recovered:
+                        alert = ("single_recovery", f"{self._area}: sensor control recovered with only one temperature sensor.")
+                    else:
+                        alert = ("sensor", f"{self._area}: heating is using only one temperature sensor.")
+                else:
+                    self._sensor_notice.pop(self._area, None)
+                    if previous:
+                        alert = ("recovery", f"{self._area}: temperature sensor control recovered. The virtual thermostat can request heating again.")
+                    elif self._notice and self._notice[0] == "recovery":
+                        alert = self._notice
+        else:
+            self._sensor_notice.clear()
+        if alert == self._notice:
             return
-        self._notice = message
+        self._notice = alert
         notice_id = "hive_virtual_" + sha256(self._attr_unique_id.encode()).hexdigest()[:24]
-        if message:
-            persistent_notification.async_create(self.hass,
-                f"{message}. New heating requests are blocked. Check Hive Heating and the sensors. Active Hive boosts are left to expire.",
-                title=self.name + " needs attention", notification_id=notice_id)
+        if alert:
+            title = "sensor control recovered" if alert[0] in ("recovery", "single_recovery") else "needs attention"
+            persistent_notification.async_create(self.hass, alert[1],
+                title=f"{self.name}: {title}", notification_id=notice_id)
         else:
             persistent_notification.async_dismiss(self.hass, notice_id)
 
@@ -534,6 +609,9 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
     def extra_state_attributes(self):
         return {"hive_virtual_controller": True, "controller_unique_id": self._attr_unique_id,
                 "active_area": self._area, "control_status": self._status,
+                "area_sensors": self._area_sensors, "sensor_fallback_status": self._hive_fallback_status,
+                "minimum_area_sensors": (self.minimum_sensors(self._area) if self.config.get("allow_partial_area")
+                                         else len(self._area_sensors)),
                 "heat_requested": self._demand, "hive_entity": self.config["hive_entity"],
                 "sensor_fault": self._fault, "fault_latched": self._latched_fault is not None,
                 "schedule": self.config["schedule"], "schedule_active": self._slot,

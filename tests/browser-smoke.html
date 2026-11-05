@@ -12,6 +12,7 @@ const state={entity_id:'climate.demo_heating',state:'auto',attributes:{hive_virt
 const linked=(id,role,area)=>({entity_id:id,state:'20',attributes:{controller_unique_id:'demo',heating_role:role,area}});
 const hass={user:{is_admin:true},states:{[state.entity_id]:state,
  'binary_sensor.demo_activity':linked('binary_sensor.demo_activity','activity'),
+ 'sensor.demo_fallback':linked('sensor.demo_fallback','sensor_fallback'),
  'sensor.demo_down':linked('sensor.demo_down','area_temperature','Downstairs'),
  'sensor.demo_up':linked('sensor.demo_up','area_temperature','Upstairs'),
  'sensor.gas_daily':{entity_id:'sensor.gas_daily',state:'36.4',attributes:{friendly_name:'Gas today',unit_of_measurement:'kWh'}},
@@ -20,6 +21,7 @@ const hass={user:{is_admin:true},states:{[state.entity_id]:state,
  callApi:async()=>{
   const now=Date.now(),t=h=>new Date(now-h*3600000).toISOString();
   return [
+   [{entity_id:'sensor.demo_fallback',state:'inactive',last_changed:t(24)},{state:'boost_active',last_changed:t(10)},{state:'hive_settings',last_changed:t(9)},{state:'inactive',last_changed:t(8)}],
    [{entity_id:'binary_sensor.demo_activity',state:'off',last_changed:t(24)},{state:'on',last_changed:t(20)},{state:'off',last_changed:t(17)},{state:'on',last_changed:t(8)},{state:'off',last_changed:t(5)}],
    [{entity_id:'sensor.demo_down',state:'18',last_changed:t(24)},{state:'20.5',last_changed:t(17)},{state:'18.8',last_changed:t(8)},{state:'20.2',last_changed:t(.1)}],
    [{entity_id:'sensor.demo_up',state:'19',last_changed:t(24)},{state:'20',last_changed:t(17)},{state:'19.2',last_changed:t(8)},{state:'19.7',last_changed:t(.1)}]];
@@ -35,11 +37,22 @@ const hass={user:{is_admin:true},states:{[state.entity_id]:state,
 const button=(parent,label)=>[...parent.querySelectorAll('button')].find(b=>b.textContent===label);
 try{
  panel.hass=hass;panel.shadowRoot.querySelector('header img').src=new URL('../custom_components/hive_virtual/brand/icon.png',import.meta.url).href;
+ state.attributes.area_sensors={'sensor.demo_down':{status:'used',temperature:19.6},'sensor.demo_up':{status:'sensor_unavailable'}};
+ panel.hass=hass;
+ assert(panel.shadowRoot.querySelector('.area-sensors').textContent.includes('19.6 °C · Used in average'),'Contributing sensor missing');
+ assert(panel.shadowRoot.querySelector('.area-sensors').textContent.includes('sensor.demo_up · Unavailable'),'Unavailable sensor missing');
+ state.attributes.sensor_fallback_status='boost_active';
+ panel.hass=hass;
+ assert(panel.shadowRoot.querySelector('.fallback').textContent.includes('when the current boost ends'),'Pending fallback not shown');
+ state.attributes.sensor_fallback_status='hive_settings';
+ panel.hass=hass;
+ assert(panel.shadowRoot.querySelector('.fallback').textContent.includes('Hive fallback active'),'Active fallback not shown');
  button(panel.shadowRoot,'History').click();
  await pause();
  assert(!panel.shadowRoot.querySelector('[data-pane="history"]').hidden,'History tab did not open');
  assert(panel.shadowRoot.querySelector('.target').getBoundingClientRect().width>0,'Thermostat controls disappeared');
  assert(panel.shadowRoot.querySelector('.activity svg'),'Activity timeline failed to render');
+ assert(panel.shadowRoot.querySelector('.fallback-history svg').textContent.includes('Hive settings active'),'Fallback timeline failed to render');
  assert(panel.shadowRoot.querySelector('.temperatures svg'),'Temperature graph failed to render');
  button(panel.shadowRoot,'Schedule').click();button(panel.shadowRoot,'Edit schedule').click();await pause();
  let editor=panel.shadowRoot.querySelector('.editor');

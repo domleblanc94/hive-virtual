@@ -15,6 +15,7 @@ class HiveVirtualPanel extends HTMLElement {
       .schedule-row{display:flex;flex-wrap:wrap;align-items:end;border-bottom:1px solid var(--divider-color);padding:12px 0;gap:8px}label{display:inline-flex;flex-direction:column;margin:4px;gap:4px}input[type=checkbox]{width:20px;height:20px}input[type=number]{width:90px}.editor{margin:14px 0}.editor>label{display:flex;max-width:100%}.chart svg{width:100%;height:auto;min-height:65px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0}.metric{background:var(--primary-background-color);padding:15px;border-radius:10px}.metric b{display:block;font-size:22px;margin-top:6px}.history-error{font-size:14px}
       .thermostat{padding-bottom:16px}.reading{font-size:1.4rem;margin:12px 0}.fault:empty{display:none}.tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px}.tabs button{margin:0}.tabs button[aria-pressed=true],.actions button[aria-pressed=true]{border-color:var(--primary-color);color:var(--primary-color);font-weight:bold}.sensor-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-items:end;border-bottom:1px solid var(--divider-color);padding:8px 0}.sensor-picker input,.sensor-picker select{min-width:0}.controller{margin-bottom:28px}
       @media(max-width:600px){main{padding:12px}section{padding:16px}.sensor-picker{grid-template-columns:minmax(0,1fr)}}
+      .area-sensors{margin:6px 0 12px;padding-left:1.4em}.area-sensors li{padding:3px 0;overflow-wrap:anywhere}
     </style><header><button id="menu" aria-label="Open sidebar">☰</button><img src="/hive_virtual/brand/icon.png" alt=""><h1>Hive Heating</h1></header><main><div id="controllers"></div>
     <p id="error" role="alert"></p></main>`;
     this.shadowRoot.getElementById('menu').onclick = () => this.dispatchEvent(new Event('hass-toggle-menu', {bubbles:true,composed:true}));
@@ -34,6 +35,7 @@ class HiveVirtualPanel extends HTMLElement {
           <section class="thermostat"><h2></h2><p class="reading"></p><p class="status"></p><p class="fault"></p>
             <label>Target °C <input class="target" type="number" min="7" max="30" step="0.5" required></label>
             <div class="actions"></div><small class="fallback"></small>
+            <div class="sensor-summary" hidden><h3>Active floor sensors</h3><small class="sensor-count"></small><ul class="area-sensors"></ul></div>
           </section>
           <nav class="tabs" aria-label="Heating views">
             <button data-view="schedule" aria-pressed="true">Schedule</button>
@@ -50,6 +52,8 @@ class HiveVirtualPanel extends HTMLElement {
             <button class="refresh">Refresh graphs</button><p class="history-error"></p><div class="activity chart"></div>
             <small>Amber is heating reported on, pale teal is off, and grey is unavailable or missing history. Hover to see interval times.</small>
             <div class="temperatures chart"></div>
+            <h3>Hive fallback history</h3><div class="fallback-history chart"></div>
+            <small>Purple is confirmed fallback, amber is waiting for a boost to end, blue is unconfirmed, pale teal is inactive, and grey is unavailable or missing history.</small>
           </section>
           <section data-pane="costs" hidden><h3>Today’s usage and cost estimates</h3><div class="metrics"></div><p class="cost-basis"></p>
             <small>Heating-only estimates use recorded heating hours, configured gas input power and the current tariff. Whole-house gas may include hot water and cooking. Standing charges are shown separately.</small>
@@ -84,7 +88,7 @@ class HiveVirtualPanel extends HTMLElement {
       for(const b of card.querySelectorAll('[data-mode]'))b.setAttribute('aria-pressed',b.dataset.mode===s.state);
       for(const b of card.querySelectorAll('button[data-admin]'))b.disabled=!hass.user?.is_admin;
       card.querySelector('.reading').textContent=`${s.attributes.current_temperature ?? 'Unknown'} °C · ${s.attributes.active_area ?? 'Unknown area'}`;
-      card.querySelector('.fallback').textContent=s.attributes.preserve_hive_settings?'Hive controls heating at its own settings between boosts. Off stops virtual heating requests.':'Off stops virtual heating requests. Active Hive boosts are left to expire.';
+      this._sensorStatus(card,s.attributes);
       const statusNames={controlling:'Monitoring room temperature',waiting_for_boost_expiry:'Waiting for boost expiry and cooldown',boost_active:'Hive boost active',boost_active_sensor_fault:'Hive boost active; sensor fault blocks further heating',starting_bounded_boost:'Starting a timed heating request',setting_safe_baseline:'Setting the low fallback temperature',waiting_for_hive_refresh:'Waiting for a fresh Hive update',sensor_fault:'Sensor readings need attention',control_error:'Hive could not be reached',hive_unavailable:'Hive is unavailable'};
       card.querySelector('.status').textContent=`Status: ${statusNames[s.attributes.control_status] || (s.attributes.control_status || 'Starting').replaceAll('_',' ')}`;
       card.querySelector('.fault').textContent=(s.attributes.fault_reason || '').replaceAll('_',' ');
@@ -96,6 +100,38 @@ class HiveVirtualPanel extends HTMLElement {
       }
       this._metrics(card,s);
       if (!card.querySelector('[data-pane="history"]').hidden) this._history(card,s);
+    }
+  }
+  _sensorStatus(card, attributes) {
+    const fallback = {
+      hive_settings: 'Hive fallback active. Hive is using its own mode and target.',
+      fixed_target: 'Hive fallback active. Hive is using the fixed fallback target.',
+      boost_active: 'Sensor control paused. Hive fallback follows when the current boost ends.',
+      unconfirmed: 'Sensor control paused. Hive fallback could not be confirmed.',
+    };
+    card.querySelector('.fallback').textContent = fallback[attributes.sensor_fallback_status] ||
+      (attributes.preserve_hive_settings ? 'Hive uses its own settings between boosts.' : 'Off stops virtual heating requests.');
+    const labels = {
+      used: 'Used in average',
+      sensor_unavailable: 'Unavailable',
+      missing_or_stale: 'Reading too old',
+      device_report_stale: 'Device report missing or too old',
+      invalid_reading: 'Invalid reading',
+      excluded: 'Excluded from average',
+    };
+    const sensors = Object.entries(attributes.area_sensors || {});
+    card.querySelector('.sensor-summary').hidden = !sensors.length;
+    const used = sensors.filter(([, reading]) => reading.status === 'used').length;
+    card.querySelector('.sensor-count').textContent = `${used} of ${sensors.length} used in the average · Minimum required: ${attributes.minimum_area_sensors ?? 1}`;
+    const list = card.querySelector('.area-sensors');
+    list.replaceChildren();
+    for (const [id, reading] of sensors) {
+      const name = this._hass.states[id]?.attributes.friendly_name || id;
+      const temperature = reading.temperature == null ? '' : ` · ${reading.temperature.toFixed(1)} °C`;
+      const row = document.createElement('li');
+      row.textContent = `${name}${temperature} · ${labels[reading.status] || 'Unknown status'}`;
+      row.title = id;
+      list.append(row);
     }
   }
   _error(e){this.shadowRoot.getElementById('error').textContent=e.message||String(e);}
@@ -115,13 +151,19 @@ class HiveVirtualPanel extends HTMLElement {
     try{
       const linked=Object.values(this._hass.states).filter(e=>e.attributes.controller_unique_id===state.attributes.controller_unique_id);
       const activity=linked.find(e=>e.attributes.heating_role==='activity');
+      const fallback=linked.find(e=>e.attributes.heating_role==='sensor_fallback');
       const temperatures=linked.filter(e=>['area_temperature','target_temperature'].includes(e.attributes.heating_role));
-      if(!activity&&!temperatures.length)throw Error('History sensors are starting. Restart after updating and allow readings to be recorded.');
-      const end=Date.now(),start=end-Number(card.querySelector('.range').value)*3600000,ids=[activity,...temperatures].filter(Boolean).map(e=>e.entity_id);
+      if(!activity&&!fallback&&!temperatures.length)throw Error('History sensors are starting. Restart after updating and allow readings to be recorded.');
+      const end=Date.now(),start=end-Number(card.querySelector('.range').value)*3600000,ids=[activity,fallback,...temperatures].filter(Boolean).map(e=>e.entity_id);
       const response=await this._hass.callApi('GET',`history/period/${new Date(start).toISOString()}?end_time=${new Date(end).toISOString()}&filter_entity_id=${encodeURIComponent(ids.join(','))}&minimal_response`);
       const groups=new Map(response.filter(a=>a.length).map(a=>[a[0].entity_id,a]));
       const activityStates=activity?groups.get(activity.entity_id)||[]:[];
       card.querySelector('.activity').replaceChildren(activityChart(activityStates,start,end));
+      const fallbackStates=fallback ? groups.get(fallback.entity_id) || [] : [];
+      card.querySelector('.fallback-history').replaceChildren(activityChart(fallbackStates,start,end,'Recorded Hive fallback timeline',{
+        hive_settings:['#9c55b4','Hive settings active'],fixed_target:['#9c55b4','Fixed fallback active'],
+        boost_active:['#df8800','Waiting for boost expiry'],unconfirmed:['#4878c3','Fallback unconfirmed'],inactive:['#cce4e5','Fallback inactive'],
+      }));
       card.querySelector('.temperatures').replaceChildren(temperatureChart(temperatures.map(e=>({name:e.attributes.area||(e.attributes.heating_role==='target_temperature'?'Target':e.attributes.friendly_name),states:groups.get(e.entity_id)||[]})),start,end));
       card.querySelector('.history-error').textContent=activityStates.length?'Recorded state, not a physical flame sensor. History depends on Recorder retention and exclusions.':'No recorded heating activity in this range. Enable Recorder/History and wait for new readings.';
     }catch(e){card.querySelector('.history-error').textContent=`Graphs unavailable: ${e.message||e}. Home Assistant History and Recorder must be enabled.`;}

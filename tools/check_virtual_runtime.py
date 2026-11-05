@@ -75,6 +75,15 @@ async def main():
         await controller.async_set_hvac_mode('auto')
         assert controller.target_temperature == 21
         assert controller.extra_state_attributes['active_area'] == 'Upstairs'
+        fallback = next(s for s in hass.states.async_all('sensor') if s.attributes.get('heating_role') == 'sensor_fallback')
+        assert fallback.state == 'inactive'
+        upstairs = hass.states.get('sensor.up_trial')
+        hass.states.async_set(upstairs.entity_id, 'unavailable', upstairs.attributes)
+        await controller._reconcile()
+        assert hass.states.get(fallback.entity_id).state == 'fixed_target'
+        hass.states.async_set(upstairs.entity_id, upstairs.state, upstairs.attributes)
+        await controller._reconcile()
+        assert hass.states.get(fallback.entity_id).state == 'inactive'
         hass.states.async_set('schedule.heating_trial', 'off')
         await controller._reconcile()
         assert not controller._demand

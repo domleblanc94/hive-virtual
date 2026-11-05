@@ -17,12 +17,15 @@ function svgNode(tag,attrs={},text) {
   const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);
   if(text!==undefined)n.textContent=text;return n;
 }
-export function activityChart(states,start,end) {
-  const svg=svgNode('svg',{viewBox:'0 0 760 82',role:'img','aria-label':'Reported heating on, off and unavailable timeline'});
+export function activityChart(states,start,end,ariaLabel='Reported heating on, off and unavailable timeline',styles={
+  on:['#df8800','On'],off:['#cce4e5','Off'],
+}) {
+  const svg=svgNode('svg',{viewBox:'0 0 760 82',role:'img','aria-label':ariaLabel});
   for(const item of intervals(states,start,end)) {
     const x=40+(item.start-start)/(end-start)*700,w=(item.end-item.start)/(end-start)*700;
-    const rect=svgNode('rect',{x,y:12,width:Math.max(0,w),height:30,fill:item.value==='on'?'#df8800':item.value==='off'?'#cce4e5':'#aeb5be'});
-    rect.append(svgNode('title',{},`${item.value} · ${new Date(item.start).toLocaleString()} → ${new Date(item.end).toLocaleString()}`));svg.append(rect);
+    const [fill,label]=styles[item.value] || ['#aeb5be','Unavailable or no history'];
+    const rect=svgNode('rect',{x,y:12,width:Math.max(0,w),height:30,fill});
+    rect.append(svgNode('title',{},`${label} · ${new Date(item.start).toLocaleString()} → ${new Date(item.end).toLocaleString()}`));svg.append(rect);
   }
   svg.append(svgNode('text',{x:40,y:68,fill:'currentColor','font-size':13},new Date(start).toLocaleString()));
   svg.append(svgNode('text',{x:740,y:68,fill:'currentColor','font-size':13,'text-anchor':'end'},new Date(end).toLocaleString()));

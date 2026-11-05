@@ -47,6 +47,8 @@ def validation_errors(error):
     """Attach actionable errors to fields without hiding schema failures."""
     first = error.errors[0] if isinstance(error, vol.MultipleInvalid) else error
     code = str(getattr(first, "msg", ""))
+    if code == "invalid_sensor_minimum":
+        return {first.path[1].lower() + "_minimum_sensors": code}
     if code in {"missing_sensors", "fallback_not_lower", "sensor_limits_reversed"}:
         return {first.path[0]: code}
     if getattr(first, "path", None) and first.path[0] not in ("areas", "schedule"):
@@ -125,6 +127,7 @@ class HiveVirtualOptionsFlow(config_entries.OptionsFlow):
                 return self._save(apply_sensors(config, user_input))
             except (vol.Invalid, ValueError) as err:
                 errors = validation_errors(err)
+                errors = {key.replace("_minimum_sensors", "_sensors"): value for key, value in errors.items()}
                 config = {**config, "areas": {"Downstairs": user_input.get("downstairs_sensors", []),
                           "Upstairs": user_input.get("upstairs_sensors", [])},
                           "default_area": user_input.get("default_area", "Downstairs")}
@@ -133,12 +136,18 @@ class HiveVirtualOptionsFlow(config_entries.OptionsFlow):
     async def async_step_safety(self, user_input=None):
         config = self._config()
         errors = {}
+        minimum_fields = {area.lower() + "_minimum_sensors": area for area in ("Downstairs", "Upstairs")}
         if user_input is not None:
+            proposed = {**config, **{key: value for key, value in user_input.items() if key not in minimum_fields}}
+            proposed["minimum_area_sensors"] = {
+                **config.get("minimum_area_sensors", {}),
+                **{area: user_input[key] for key, area in minimum_fields.items() if key in user_input},
+            }
             try:
-                return self._save({**config, **user_input})
+                return self._save(proposed)
             except (vol.Invalid, ValueError) as err:
                 errors = validation_errors(err)
-                config = {**config, **user_input}
+                config = proposed
         limits = {
             "call_temperature": (7, 32, 0.5), "idle_temperature": (7, 30, 0.5),
             "boost_minutes": (1, 15, 1), "tolerance": (0.1, 2, 0.1),
@@ -154,6 +163,9 @@ class HiveVirtualOptionsFlow(config_entries.OptionsFlow):
         fields[vol.Required("notifications", default=config.get("notifications", True))] = selector.BooleanSelector()
         fields[vol.Required("use_sensor_availability", default=config.get("use_sensor_availability", False))] = selector.BooleanSelector()
         fields[vol.Required("allow_partial_area", default=config.get("allow_partial_area", False))] = selector.BooleanSelector()
+        for key, area in minimum_fields.items():
+            fields[vol.Required(key, default=config.get("minimum_area_sensors", {}).get(area, 1))] = selector.NumberSelector({
+                "min": 1, "max": len(set(config["areas"][area])), "step": 1, "mode": "box"})
         fields[vol.Required("preserve_hive_settings", default=config.get("preserve_hive_settings", False))] = selector.BooleanSelector()
         schema = vol.Schema(fields)
         return self.async_show_form(step_id="safety", data_schema=schema, errors=errors)

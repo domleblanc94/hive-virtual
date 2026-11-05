@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3
+
+- Show which active-floor sensors contribute to the average, the minimum required, and whether Hive fallback is active.
+- Set different minimum available sensor counts upstairs and downstairs when partial-area control is enabled.
+- Show Home Assistant notifications for single-sensor operation, fallback and recovery, and record fallback transitions for the History tab.
+
 ## 0.6.2
 
 - Optionally keep using the remaining temperature sensors on the active floor when some are unavailable. Stop new boosts when none remain.

@@ -286,26 +286,56 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entity.area_temperature("Downstairs"), 18)
         self.assertTrue(self.entity._demand)
         self.call.assert_awaited_once()
+        self.assertEqual(self.entity.extra_state_attributes["area_sensors"], {
+            "sensor.down": {"status": "used", "temperature": 18},
+            "sensor.living_room": {"status": "sensor_unavailable"},
+        })
 
         self.entity._pending_until -= timedelta(minutes=8)
         self.states["sensor.down"].state = "unavailable"
+        self.states["climate.hive"].attributes["preset_mode"] = "boost"
         await self.entity._reconcile()
         self.assertIsNone(self.entity.current_temperature)
         self.assertIsNone(self.entity.area_temperature("Downstairs"))
         self.assertEqual(self.entity.fault_message, "no_available_sensors:Downstairs")
         self.assertFalse(self.entity._demand)
         self.call.assert_awaited_once()
+        self.assertEqual(self.entity.extra_state_attributes["sensor_fallback_status"], "boost_active")
+        self.states["climate.hive"].attributes["preset_mode"] = "none"
+        await self.entity._reconcile()
+        self.assertEqual(self.entity.extra_state_attributes["sensor_fallback_status"], "hive_settings")
+        self.entity._pending_until -= timedelta(minutes=8)
 
         self.states["sensor.living_room"].state = "17"
         await self.entity._reconcile()
         self.assertEqual(self.entity.current_temperature, 17)
         self.assertIsNone(self.entity.fault_message)
+        self.assertIsNone(self.entity.extra_state_attributes["sensor_fallback_status"])
         self.assertEqual(self.call.await_count, 2)
 
         self.states["sensor.living_room"].state = "60"
         await self.entity._reconcile()
         self.assertEqual(self.entity.fault_message, "out_of_range:sensor.living_room")
         self.assertFalse(self.entity._demand)
+        self.assertEqual(self.entity.extra_state_attributes["area_sensors"]["sensor.living_room"]["status"], "excluded")
+
+    async def test_minimum_sensors_applies_to_each_floor(self):
+        self.entity.config.update(allow_partial_area=True, minimum_area_sensors={"Downstairs": 2})
+        self.entity.config["areas"]["Downstairs"].append("sensor.living_room")
+        self.states["sensor.living_room"] = state("unknown", unit_of_measurement="°C")
+        self.assertIsNone(self.entity.area_temperature("Downstairs"))
+        self.assertEqual(self.entity.area_temperature("Upstairs"), 22)
+        await self.entity.async_turn_on()
+        self.assertEqual(self.entity.fault_message, "too_few_sensors:Downstairs")
+        self.assertEqual(self.entity.sensor_fallback_status, "fixed_target")
+        self.call.assert_not_called()
+        self.states["sensor.living_room"].state = "19"
+        await self.entity._reconcile()
+        self.assertEqual(self.entity.current_temperature, 18.5)
+        self.assertIsNone(self.entity.sensor_fallback_status)
+        self.call.assert_awaited_once()
+        with self.assertRaisesRegex(vol.Invalid, "invalid_sensor_minimum"):
+            climate.validate_config({**self.entity.config, "minimum_area_sensors": {"Upstairs": 2}})
 
     async def test_service_error_is_retried(self):
         self.call.side_effect = RuntimeError("offline")
@@ -540,6 +570,36 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             self.entity._fault = None
             climate.HiveVirtual._notify(self.entity)
             notice.async_dismiss.assert_called_once()
+    async def test_sensor_notifications_follow_loss_fallback_and_recovery(self):
+        notice = module(async_create=Mock(), async_dismiss=Mock())
+        component = module(persistent_notification=notice)
+        entity = self.entity
+        entity._store = object()
+        entity._area = "Downstairs"
+        entity._attr_hvac_mode = climate.HVACMode.HEAT
+        entity._attr_current_temperature = 18
+        entity._area_sensors = {"sensor.down": {"status": "used"}, "sensor.other": {"status": "sensor_unavailable"}}
+        with patch.dict(sys.modules, {"homeassistant": module(components=component), "homeassistant.components": component}):
+            notify = lambda: climate.HiveVirtual._notify(entity)
+            notify()
+            notify()
+            notice.async_create.assert_called_once()
+            self.assertIn("only one temperature sensor", notice.async_create.call_args.args[1])
+            entity._hive_fallback_status = "hive_settings"
+            entity._attr_current_temperature = None
+            entity._fault = "no_available_sensors:Downstairs"
+            notify()
+            self.assertIn("Hive is using its own", notice.async_create.call_args.args[1])
+            entity._hive_fallback_status = entity._fault = None
+            entity._attr_current_temperature = 18
+            notify()
+            self.assertIn("recovered with only one", notice.async_create.call_args.args[1])
+            entity._area_sensors["sensor.other"]["status"] = "used"
+            notify()
+            notify()
+            self.assertEqual(notice.async_create.call_count, 4)
+            self.assertIn("can request heating again", notice.async_create.call_args.args[1])
+
     async def test_boost_appearing_during_mode_change_prevents_target_write(self):
         self.states["climate.hive"].state = "auto"
         async def mode_changed(*args, **kwargs):

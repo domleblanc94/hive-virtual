@@ -19,6 +19,7 @@
       "invalid_settings": "These settings could not be saved. Check your selections and try again.",
       "invalid_schedule": "Check the time, temperature, area and selected days. Select at least one day and avoid duplicate start times on the same day.",
       "missing_sensors": "Select at least one temperature sensor for this area.",
+      "invalid_sensor_minimum": "The minimum must be at least one and cannot exceed the number of sensors selected for this floor.",
       "fallback_not_lower": "The fallback temperature must be lower than the Hive boost target.",
       "sensor_limits_reversed": "The lowest plausible temperature must be below the highest plausible temperature.",
       "invalid_value": "Enter a valid value within the allowed range."
@@ -95,7 +96,7 @@
       },
       "safety": {
         "title": "Safety limits and heating requests",
-        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. Enable Keep Hive’s own mode and target to manage the fallback in Hive. The fixed fallback field is ignored when enabled. Hive can heat on its own between boosts, even with the virtual thermostat Off or a sensor fault. For sensors that report only on change, availability mode accepts unchanged readings until Home Assistant marks the entity unknown or unavailable. Explicit device-report timestamps still use the timeout. Enable Use remaining sensors when some are unavailable to keep using an area while at least one sensor is available.",
+        "description": "Controller requests are timed boosts and expire through Hive. Existing boosts are never cancelled, even after a sensor fault. Test expiry with Home Assistant offline before relying on it. Enable Keep Hive’s own mode and target to manage the fallback in Hive. The fixed fallback field is ignored when enabled. Hive can heat on its own between boosts, even with the virtual thermostat Off or a sensor fault. For sensors that report only on change, availability mode accepts unchanged readings until Home Assistant marks the entity unknown or unavailable. Explicit device-report timestamps still use the timeout. Enable Use remaining sensors when some are unavailable to keep using an area while its minimum number of sensors is available.",
         "data": {
           "call_temperature": "Hive boost target (°C)",
           "idle_temperature": "Fixed fallback target (°C)",
@@ -105,6 +106,8 @@
           "sensor_timeout": "Sensor report timeout (minutes)",
           "use_sensor_availability": "Use sensor availability instead of last update time",
           "allow_partial_area": "Use remaining sensors when some are unavailable",
+          "downstairs_minimum_sensors": "Minimum available sensors downstairs",
+          "upstairs_minimum_sensors": "Minimum available sensors upstairs",
           "sensor_min": "Lowest plausible sensor temperature (°C)",
           "sensor_max": "Highest plausible sensor temperature (°C)",
           "max_sensor_jump": "Maximum sudden change (°C)",
@@ -112,7 +115,7 @@
           "max_sensor_spread": "Maximum difference between room sensors (°C)",
           "high_temperature_cutoff": "High-temperature cutoff (°C)",
           "cooldown_minutes": "Minimum pause after a boost ends (minutes)",
-          "notifications": "Show persistent fault notifications"
+          "notifications": "Show notifications for faults, sensor loss and recovery"
         }
       },
       "schedule_source": {
@@ -128,6 +131,7 @@
       "invalid_settings": "These settings could not be saved. Check your selections and try again.",
       "invalid_schedule": "Check the time, temperature, area and selected days. Select at least one day and avoid duplicate start times on the same day.",
       "missing_sensors": "Select at least one temperature sensor for this area.",
+      "invalid_sensor_minimum": "The minimum must be at least one and cannot exceed the number of sensors selected for this floor.",
       "fallback_not_lower": "The fallback temperature must be lower than the Hive boost target.",
       "sensor_limits_reversed": "The lowest plausible temperature must be below the highest plausible temperature.",
       "invalid_value": "Enter a valid value within the allowed range.",
