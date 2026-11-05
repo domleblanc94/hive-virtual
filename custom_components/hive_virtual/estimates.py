@@ -1,5 +1,6 @@
 """Explicit, reproducible estimates; no gas-volume or tariff-unit guessing."""
 from math import isfinite
+from statistics import median
 
 
 def number(value):
@@ -64,3 +65,58 @@ class DailyRuntime:
 
     def saved(self):
         return {"day": self.day, "seconds": self.seconds}
+
+
+class GasLearning:
+    """Estimate input power from meter readings inside observed heating runs."""
+
+    def __init__(self, source=None, saved=None):
+        self.source = source
+        self.runs = []
+        if source and isinstance(saved, dict) and saved.get("source") == list(source):
+            runs = saved.get("runs")
+            if isinstance(runs, list):
+                self.runs = [kw for value in runs[-12:] if (kw := number(value)) and kw <= 100]
+        self.last = None
+        self.on = None
+        self.started = None
+        self.first = self.latest = None
+
+    @property
+    def kw(self):
+        return median(self.runs) if len(self.runs) >= 3 else None
+
+    def update(self, now, on, reading):
+        continuous = self.last is not None and 0 <= now - self.last <= 120
+        if not continuous or on is None:
+            self.started = None
+        elif on and self.on is False:
+            self.started = now
+            self.first = self.latest = None
+        self.last = now
+        self.on = on
+        if self.started is None:
+            return
+        if on is False:
+            self.started = None
+            if self.first and self.latest:
+                elapsed = self.latest[0] - self.first[0]
+                if elapsed >= 180:
+                    power = (self.latest[1] - self.first[1]) * 3600 / elapsed
+                    if 0 < power <= 100:
+                        self.runs = (self.runs + [power])[-12:]
+            return
+        if reading is None:
+            self.started = None
+            return
+        reported, energy, unit = reading
+        if not self.started < reported <= now:
+            return
+        if self.latest and (reported < self.latest[0] or energy < self.latest[1] or unit != self.latest[2]):
+            self.started = None
+            return
+        self.first = self.first or reading
+        self.latest = reading
+
+    def saved(self):
+        return {"source": list(self.source), "runs": self.runs} if self.source else None

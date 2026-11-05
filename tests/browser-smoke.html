@@ -16,6 +16,7 @@ const hass={user:{is_admin:true},states:{[state.entity_id]:state,
  'sensor.demo_down':linked('sensor.demo_down','area_temperature','Downstairs'),
  'sensor.demo_up':linked('sensor.demo_up','area_temperature','Upstairs'),
  'sensor.gas_daily':{entity_id:'sensor.gas_daily',state:'36.4',attributes:{friendly_name:'Gas today',unit_of_measurement:'kWh'}},
+ 'sensor.gas_total':{entity_id:'sensor.gas_total',state:'1097.2',attributes:{friendly_name:'Gas meter',unit_of_measurement:'kWh'}},
  'sensor.gas_rate':{entity_id:'sensor.gas_rate',state:'7.5',attributes:{friendly_name:'Gas unit rate',unit_of_measurement:'p/kWh'}}},
  callService:async()=>{},
  callApi:async()=>{
@@ -64,9 +65,17 @@ try{
  search.value='sensor.gas_daily';search.dispatchEvent(new Event('input'));
  assert(editor.querySelector('select').options.length===2,'Sensor search did not filter by entity ID');
  editor.querySelectorAll('select')[0].value='sensor.gas_daily';editor.querySelectorAll('select')[2].value='sensor.gas_rate';
+ editor.querySelectorAll('select')[4].value='sensor.gas_total';
+ editor.querySelectorAll('input[type=checkbox]')[2].checked=true;
  button(editor,'Save cost settings').click();await pause();
  assert(saves.at(-1).cost.unit_rate_entity==='sensor.gas_rate','Tariff sensor not saved');
  assert(saves.at(-1).cost.gas_energy_today_entity==='sensor.gas_daily','Usage sensor not saved');
+ assert(saves.at(-1).cost.learn_from_gas_meter&&saves.at(-1).cost.gas_meter_entity==='sensor.gas_total','Learning settings not saved');
+ state.attributes.cost_sources=saves.at(-1).cost;
+ state.attributes.learned_gas_kw=12.5;state.attributes.gas_learning_runs=4;
+ panel.hass=hass;
+ assert(panel.shadowRoot.querySelector('.metrics').textContent.includes('12.5 kW'),'Learned rate missing');
+ assert(panel.shadowRoot.querySelector('.metrics').textContent.includes('Heating runs used4'),'Sample count missing');
  assert(saves.at(-1).cost.rate_in_pence===true,'Tariff units not retained');
  native=true;button(panel.shadowRoot,'Schedule').click();button(panel.shadowRoot,'Edit schedule').click();await pause();editor=panel.shadowRoot.querySelector('.editor');
  assert(editor.querySelector('.schedule-row'),'Native blocks missing');button(editor,'Save schedule').click();await pause();

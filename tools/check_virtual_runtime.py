@@ -120,7 +120,8 @@ async def main():
         hass.states.async_set('sensor.gas_rate_trial', '7.5', {'unit_of_measurement': 'p/kWh'})
         hass.states.async_set('sensor.gas_cost_trial', '2.75', {'unit_of_measurement': 'GBP'})
         costs = {'gas_energy_today_entity': 'sensor.gas_daily_trial', 'gas_cost_today_entity': 'sensor.gas_cost_trial',
-                 'unit_rate_entity': 'sensor.gas_rate_trial', 'rate_in_pence': True, 'boiler_input_kw': 12}
+                 'unit_rate_entity': 'sensor.gas_rate_trial', 'rate_in_pence': True, 'boiler_input_kw': 12,
+                 'learn_from_gas_meter': True, 'gas_meter_entity': 'sensor.gas_total_trial'}
         saved = await call_ws('hive_virtual/save', {'entity_id': controller.entity_id, 'revision': page['revision'], 'cost': costs})
         assert saved.get('value', {}).get('saved'), saved
         await hass.async_block_till_done()
@@ -128,6 +129,20 @@ async def main():
         assert abs(controller.cost_estimates()['heating_cost'] - .9) < .01
         assert controller.cost_estimates()['household_variable_cost'] == 2.75
         assert controller.cost_estimates()['household_gas_kwh'] == 30
+        for index in range(3):
+            start = index * 600
+            meter = controller._gas_learning
+            meter.update(start, False, None)
+            meter.update(start + 30, True, (start, 100, 'kWh'))
+            meter.update(start + 60, True, (start + 60, 100, 'kWh'))
+            meter.update(start + 150, True, (start + 60, 100, 'kWh'))
+            meter.update(start + 240, True, (start + 240, 101, 'kWh'))
+            meter.update(start + 270, False, None)
+        assert controller.extra_state_attributes['gas_learning_runs'] == 3
+        assert controller.extra_state_attributes['learned_gas_kw'] == 20
+        assert abs(controller.cost_estimates()['heating_cost'] - 1.5) < .01
+        assert await controller._persist()
+        assert (await controller._store.async_load())['gas_learning']['runs'] == [20, 20, 20]
         await controller._reconcile()
         assert len([s for s in hass.states.async_all('sensor') if s.attributes.get('heating_role') == 'area_temperature']) == 2
         assert await async_setup_component(hass, 'schedule', {})
@@ -160,7 +175,12 @@ async def main():
                           'durable_request': bool((await controller._store.async_load())['pending_until']),
                           'native_schedule_options': True, 'fault_survived_reload': True, 'sidebar': True,
                           'page_settings_permissions': True, 'native_schedule_save': True, 'cost_units': True,
-                          'temperature_sensors': True, 'edit_conflict_detection': True, 'builtin_schedule_save': True}))
+                          'temperature_sensors': True, 'edit_conflict_detection': True, 'builtin_schedule_save': True,
+                          'learned_gas_cost': True}))
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        assert entry.runtime_data.extra_state_attributes['learned_gas_kw'] == 20
+        assert entry.runtime_data.extra_state_attributes['gas_learning_runs'] == 3
         assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await hass.async_stop()

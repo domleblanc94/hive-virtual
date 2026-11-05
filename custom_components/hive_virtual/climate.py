@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .control import SensorGuard, average, demand, schedule_slot
-from .estimates import DailyRuntime, energy_kwh, estimate, number, price
+from .estimates import DailyRuntime, GasLearning, energy_kwh, estimate, number, price
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = vol.Schema({
@@ -35,6 +35,8 @@ CONFIG_SCHEMA = vol.Schema({
     vol.Optional("cooldown_minutes", default=2): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
     vol.Optional("cost", default={}): vol.Schema({
         vol.Optional("gas_energy_today_entity"): cv.entity_id,
+        vol.Optional("gas_meter_entity"): cv.entity_id,
+        vol.Optional("learn_from_gas_meter", default=False): cv.boolean,
         vol.Optional("gas_cost_today_entity"): cv.entity_id,
         vol.Optional("unit_rate_entity"): cv.entity_id,
         vol.Optional("standing_charge_entity"): cv.entity_id,
@@ -88,6 +90,11 @@ def validate_config(config):
                             if key not in ("platform", "scan_interval", "entity_namespace")})
     if not config["areas"]:
         raise vol.Invalid("At least one temperature area is required")
+    cost = config["cost"]
+    if cost["learn_from_gas_meter"] and not cost.get("gas_meter_entity"):
+        raise vol.Invalid("Choose a cumulative gas meter to learn heating input power", path=["cost", "gas_meter_entity"])
+    if cost.get("gas_meter_entity") and not cost["gas_meter_entity"].startswith("sensor."):
+        raise vol.Invalid("Gas meter must be a sensor", path=["cost", "gas_meter_entity"])
     if config.get("default_area", next(iter(config["areas"]))) not in config["areas"]:
         raise vol.Invalid("default_area must name a configured area")
     for area, minimum in config["minimum_area_sensors"].items():
@@ -163,6 +170,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self.config.setdefault("sensor_report_entities", {})
         self.config.setdefault("cost", {"currency": "GBP", "rate_in_pence": False, "cost_in_pence": False,
                                       "boiler_input_kw": 0, "gas_kwh_per_m3": 0})
+        self._gas_learning = GasLearning(self._gas_source())
 
     def _sensor_state_fault(self, state):
         if state is None or state.state in ("unknown", "unavailable"):
@@ -203,11 +211,31 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             return self.hass.states.get(config.get(key, ""))
         gas, cost, rate, standing = (source(key) for key in (
             "gas_energy_today_entity", "gas_cost_today_entity", "unit_rate_entity", "standing_charge_entity"))
-        return estimate(self._runtime.seconds / 3600, config["boiler_input_kw"],
+        learned = self._gas_learning.kw if config.get("learn_from_gas_meter") else None
+        return estimate(self._runtime.seconds / 3600, learned or config["boiler_input_kw"],
             price(rate.state, config["rate_in_pence"]) if rate else None,
             energy_kwh(gas.state, gas.attributes.get("unit_of_measurement"), config["gas_kwh_per_m3"]) if gas else None,
             price(cost.state, config["cost_in_pence"]) if cost else None,
             price(standing.state, config["cost_in_pence"]) if standing else None)
+
+    def _gas_source(self):
+        cost = self.config["cost"]
+        if entity := cost.get("gas_meter_entity"):
+            return self.config["hive_entity"], entity, cost["gas_kwh_per_m3"]
+        return None
+
+    def _learn_gas(self, timestamp, heating):
+        if not self.config["cost"].get("learn_from_gas_meter"):
+            return
+        _, entity, factor = self._gas_learning.source
+        meter = self.hass.states.get(entity)
+        reading = None
+        if meter:
+            unit = meter.attributes.get("unit_of_measurement")
+            energy = energy_kwh(meter.state, unit, factor)
+            if energy is not None:
+                reading = meter.last_changed.timestamp(), energy, unit
+        self._gas_learning.update(timestamp, heating, reading)
 
     @property
     def device_info(self):
@@ -229,6 +257,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
     def _safety_data(self):
         return {"fault": self._latched_fault,
                 "runtime": self._runtime.saved(),
+                "gas_learning": self._gas_learning.saved(),
                 "pending_until": self._pending_until.isoformat() if self._pending_until else None,
                 "accepted": {key: [value, when.isoformat()] for key, (value, when) in self._guard.accepted.items()}}
 
@@ -243,7 +272,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         # Faults and request reservations are immediate. Sample unchanged
         # temperature history at most every five minutes to limit disk writes.
         if not force and self._saved and self._last_saved_at and (dt_util.utcnow() - self._last_saved_at).total_seconds() < 300:
-            if data["fault"] == self._saved["fault"] and data["pending_until"] == self._saved["pending_until"]:
+            if all(data[key] == self._saved.get(key) for key in ("fault", "pending_until", "gas_learning")):
                 return True
         try:
             await self._store.async_save(data)
@@ -270,7 +299,10 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
 
     async def async_update_config(self, config):
         async with self._lock:
+            was_learning = self.config["cost"].get("learn_from_gas_meter", False)
             self.config = validate_config(config)
+            if self._gas_learning.source != self._gas_source() or was_learning != self.config["cost"]["learn_from_gas_meter"]:
+                self._gas_learning = GasLearning(self._gas_source(), self._gas_learning.saved())
             self._watch()
         await self._reconcile()
 
@@ -296,6 +328,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         try:
             saved = await self._store.async_load() or {}
             self._runtime = DailyRuntime(saved.get("runtime"))
+            self._gas_learning = GasLearning(self._gas_source(), saved.get("gas_learning"))
             self._latched_fault = saved.get("fault")
             if saved.get("pending_until"):
                 self._pending_until = dt_util.parse_datetime(saved["pending_until"])
@@ -472,6 +505,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             now, local = dt_util.utcnow(), dt_util.now()
             self._runtime.update(now.timestamp(), local.date().isoformat(),
                                  local.hour * 3600 + local.minute * 60 + local.second, on)
+            self._learn_gas(now.timestamp(), on)
             if hive is None or hive.state in ("unknown", "unavailable"):
                 self._status = "hive_unavailable"
             elif self._boosting():
@@ -623,6 +657,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 "daily_heating_hours": round(self._runtime.seconds / 3600, 4),
                 "cost_estimates": self.cost_estimates(), "currency": self.config["cost"]["currency"],
                 "cost_sources": self.config["cost"],
+                "learned_gas_kw": self._gas_learning.kw, "gas_learning_runs": len(self._gas_learning.runs),
                 "retry_after": self._pending_until.isoformat() if self._pending_until else None}
 
     async def async_set_temperature(self, **kwargs):

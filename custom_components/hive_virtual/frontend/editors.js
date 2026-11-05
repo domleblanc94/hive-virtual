@@ -73,19 +73,19 @@ export async function scheduleEditor(panel,host,state){
 export async function costEditor(panel,host,state){
   const hass=panel._hass,config=await hass.callWS({type:'hive_virtual/config',entity_id:state.entity_id}),old=config.cost;
   host.replaceChildren();host.append(node('h3','Gas costs and estimates'));
-  host.append(node('p','Choose DAILY usage/cost sensors, not a lifetime meter. Measured gas can include hot water and cooking. Heating-only cost uses reported runtime × your estimated gas input power × the current tariff.'));
+  host.append(node('p','Use daily sensors for whole-house usage and costs. For learning, choose a cumulative gas meter that updates during heating runs. Gas used for hot water or cooking during those runs can affect the estimate.'));
   const sensors=[{value:'',label:'Not configured'},...Object.values(hass.states).filter(e=>e.entity_id.startsWith('sensor.')).map(e=>({value:e.entity_id,label:`${e.attributes.friendly_name||e.entity_id} (${e.state} ${e.attributes.unit_of_measurement||''})`}))];
   const controls={};
-  for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)'})){
+  for(const[key,label]of Object.entries({gas_energy_today_entity:'Gas usage today (kWh, Wh, MWh or m³)',gas_cost_today_entity:'Existing gas cost today (optional)',unit_rate_entity:'Gas unit-rate sensor (per kWh)',standing_charge_entity:'Daily standing-charge sensor (shown separately)',gas_meter_entity:'Cumulative gas meter for learning (kWh, Wh, MWh or m³)'})){
     const options=old[key]&&!sensors.some(s=>s.value===old[key])?[...sensors,{value:old[key],label:`${old[key]} (currently missing)`}]:sensors;
     const {group,select}=sensorPicker(label,options,old[key]||'');
     controls[key]=select;host.append(group);
   }
-  for(const[key,label,max]of [['boiler_input_kw','Estimated gas INPUT power while heating (kW; 0 disables estimate)',100],['gas_kwh_per_m3','kWh per m³ conversion (only for a volume sensor; 0 disables conversion)',20]]){
+  for(const[key,label,max]of [['boiler_input_kw','Manual gas input power (kW; 0 leaves the estimate blank until learned)',100],['gas_kwh_per_m3','kWh per m³ conversion (only for a volume sensor; 0 disables conversion)',20]]){
     const c=input('number',old[key]||0);c.min=0;c.max=max;c.step=.01;controls[key]=c;host.append(field(label,c));
   }
   controls.currency=input('text',old.currency||'GBP');controls.currency.pattern='[A-Z]{3}';host.append(field('Currency code (GBP, EUR, etc.)',controls.currency));
-  for(const[key,label]of [['rate_in_pence','Unit-rate sensor uses pence/cents per kWh (divide by 100)'],['cost_in_pence','Cost and standing-charge sensors use pence/cents (divide by 100)']]){
+  for(const[key,label]of [['rate_in_pence','Unit-rate sensor uses pence/cents per kWh (divide by 100)'],['cost_in_pence','Cost and standing-charge sensors use pence/cents (divide by 100)'],['learn_from_gas_meter','Learn from gas meter']]){
     const c=input('checkbox','');c.checked=!!old[key];controls[key]=c;host.append(field(label,c));
   }
   const status=node('p');status.setAttribute('role','status');

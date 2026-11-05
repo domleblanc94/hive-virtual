@@ -63,7 +63,7 @@ class HeatingSensor(SensorEntity):
     def extra_state_attributes(self):
         return {"controller_unique_id": self.controller._attr_unique_id, "heating_role": self.kind,
                 "area": self.area, "period_start": self.controller._runtime.day,
-                "basis": "Runtime × configured gas input power × current tariff" if self.kind == "heating_cost" else
+                "basis": "Runtime × learned or manual gas input power × current tariff" if self.kind == "heating_cost" else
                 "Whole-house gas; may include hot water and cooking" if self.kind.startswith("household") else
                 "Reported heating intervals; unavailable gaps are omitted" if self.kind == "heating_hours" else None}
 

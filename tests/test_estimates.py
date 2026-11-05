@@ -9,6 +9,40 @@ spec.loader.exec_module(model)
 
 
 class EstimateTests(unittest.TestCase):
+    def test_learning_uses_complete_runs_and_restores_only_matching_meter(self):
+        source = ("climate.hive", "sensor.gas", 0)
+        learning = model.GasLearning(source)
+        for index, kwh in enumerate((1, 3, 1.2)):
+            start = index * 600
+            learning.update(start, False, None)
+            learning.update(start + 30, True, (start, 50, "kWh"))
+            learning.update(start + 60, True, (start + 60, 50, "kWh"))
+            learning.update(start + 150, True, (start + 60, 50, "kWh"))
+            learning.update(start + 240, True, (start + 240, 50 + kwh, "kWh"))
+            learning.update(start + 270, False, (start + 270, 90, "kWh"))
+            if index < 2:
+                self.assertIsNone(learning.kw)
+        self.assertEqual(len(learning.runs), 3)
+        self.assertAlmostEqual(learning.kw, 24)
+        restored = model.GasLearning(source, learning.saved())
+        self.assertAlmostEqual(restored.kw, 24)
+        self.assertIsNone(restored.last)
+        self.assertEqual(model.GasLearning(("climate.hive", "sensor.other", 0), learning.saved()).runs, [])
+
+    def test_learning_discards_meter_resets_and_missing_heating_reports(self):
+        for bad_action, bad_reading in ((True, (240, 0, "kWh")), (None, (240, 51, "kWh")), (True, None)):
+            learning = model.GasLearning(("climate.hive", "sensor.gas", 0))
+            learning.update(0, False, None)
+            learning.update(30, True, (0, 49, "kWh"))
+            learning.update(60, True, (60, 50, "kWh"))
+            learning.update(150, True, (60, 50, "kWh"))
+            learning.update(240, True, (240, 51, "kWh"))
+            if bad_reading is not None:
+                bad_reading = (270, bad_reading[1], bad_reading[2])
+            learning.update(270, bad_action, bad_reading)
+            learning.update(300, False, None)
+            self.assertEqual(learning.runs, [])
+
     def test_units_are_explicit(self):
         self.assertEqual(model.energy_kwh(1500, "Wh"), 1.5)
         self.assertEqual(model.energy_kwh(1.5, "MWh"), 1500)

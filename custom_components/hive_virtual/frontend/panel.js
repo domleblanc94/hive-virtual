@@ -55,8 +55,8 @@ class HiveVirtualPanel extends HTMLElement {
             <h3>Hive fallback history</h3><div class="fallback-history chart"></div>
             <small>Purple is confirmed fallback, amber is waiting for a boost to end, blue is unconfirmed, pale teal is inactive, and grey is unavailable or missing history.</small>
           </section>
-          <section data-pane="costs" hidden><h3>Today’s usage and cost estimates</h3><div class="metrics"></div><p class="cost-basis"></p>
-            <small>Heating-only estimates use recorded heating hours, configured gas input power and the current tariff. Whole-house gas may include hot water and cooking. Standing charges are shown separately.</small>
+          <section data-pane="costs" hidden><h3>Today’s usage and cost estimates</h3><div class="metrics"></div><p class="learning-basis"></p><p class="cost-basis"></p>
+            <small>Heating-only estimates use recorded heating hours, learned or manual gas input power and the current tariff. Whole-house gas may include hot water and cooking. Standing charges are shown separately.</small>
             <div class="editor"></div>
           </section>`;
         card.querySelector('.target').onchange = ({target}) => {
@@ -137,9 +137,20 @@ class HiveVirtualPanel extends HTMLElement {
   _error(e){this.shadowRoot.getElementById('error').textContent=e.message||String(e);}
   _metrics(card,s){
     const values=s.attributes.cost_estimates||{},source=s.attributes.cost_sources||{},currency=s.attributes.currency||'GBP',root=card.querySelector('.metrics');root.replaceChildren();
+    const learning = Boolean(source.learn_from_gas_meter);
+    const learned = s.attributes.learned_gas_kw;
+    const runs = s.attributes.gas_learning_runs ?? 0;
+    const metrics = [];
+    if (learning) {
+      metrics.push(['Learned gas input', learned == null ? 'Learning…' : `${learned.toFixed(1)} kW`],
+        ['Heating runs used', String(runs)]);
+    }
+    card.querySelector('.learning-basis').textContent = !learning ? '' : learned != null ?
+      'Heating cost uses the learned median gas input. Hot water and cooking can affect it.' :
+      `Learning needs three completed runs with at least three minutes between in-run meter changes. ${source.boiler_input_kw > 0 ? 'Using your manual kW for now.' : 'Heating cost will appear once a rate is learned and a tariff is available.'}`;
     const missing=configured=>configured?'Unavailable':'Not configured';
     const money=(v,configured)=>{if(v===null||v===undefined)return missing(configured);try{return new Intl.NumberFormat(undefined,{style:'currency',currency}).format(v);}catch{return `${v.toFixed(2)} ${currency}`;}};
-    for(const[label,value]of [['Reported heating hours',`${Number(s.attributes.daily_heating_hours||0).toFixed(2)} h`],['Estimated heating-only cost',money(values.heating_cost,source.boiler_input_kw>0&&source.unit_rate_entity)],['Whole-house gas usage',values.household_gas_kwh==null?missing(source.gas_energy_today_entity):`${values.household_gas_kwh.toFixed(2)} kWh`],['Whole-house gas cost',money(values.household_variable_cost,source.gas_cost_today_entity||(source.gas_energy_today_entity&&source.unit_rate_entity))],['Standing charge (separate)',money(values.standing_charge,source.standing_charge_entity)]]){
+    for(const[label,value]of [['Reported heating hours',`${Number(s.attributes.daily_heating_hours||0).toFixed(2)} h`],['Estimated heating-only cost',money(values.heating_cost,(source.boiler_input_kw>0||learning)&&source.unit_rate_entity)],...metrics,['Whole-house gas usage',values.household_gas_kwh==null?missing(source.gas_energy_today_entity):`${values.household_gas_kwh.toFixed(2)} kWh`],['Whole-house gas cost',money(values.household_variable_cost,source.gas_cost_today_entity||(source.gas_energy_today_entity&&source.unit_rate_entity))],['Standing charge (separate)',money(values.standing_charge,source.standing_charge_entity)]]){
       const e=document.createElement('div');e.className='metric';e.textContent=label;const b=document.createElement('b');b.textContent=value;e.append(b);root.append(e);
     }
     card.querySelector('.cost-basis').textContent=s.attributes.cost_sources?.gas_cost_today_entity?'Household cost is the selected daily cost sensor, as reported; it may already include standing charges.':'Household cost is daily gas usage × the current unit rate, excluding standing charges. Changing tariffs reprice estimates; these are not a bill.';

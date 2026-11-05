@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4
+
+- Optionally learn gas input power from cumulative meter changes during reported heating runs. Show the learned kW and sample count, and use the learned rate for heating-only cost estimates.
+
 ## 0.6.3
 
 - Show which active-floor sensors contribute to the average, the minimum required, and whether Hive fallback is active.
