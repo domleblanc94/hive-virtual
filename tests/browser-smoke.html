@@ -73,8 +73,12 @@ try{
  assert(editor.hidden,'Schedule editor did not collapse');
  button(panel.shadowRoot,'Edit schedule').click();
  assert(!editor.hidden&&editor.querySelector('input[type=number]').value==='21','Schedule draft was lost on collapse');
+ editor.querySelectorAll('input[type=time]')[1].value='05:30';
+ assert(editor.querySelector('input[type=time]').value==='06:30','Draft reordered before save');
  button(editor,'Save schedule').click();await pause();
- assert(saves.at(-1).schedule[0].temperature===21,'Edited schedule target not saved');
+ assert(saves.at(-1).schedule[0].time==='05:30'&&saves.at(-1).schedule[0].area==='Upstairs','Schedule did not save in time order');
+ assert(saves.at(-1).schedule[1].temperature===21,'Edited schedule target not saved');
+ assert(editor.querySelector('input[type=time]').value==='05:30','Schedule editor did not reorder after save');
  button(panel.shadowRoot,'Collapse schedule editor').click();
  button(panel.shadowRoot,'Gas & costs').click();button(panel.shadowRoot,'Configure costs').click();await pause();editor=panel.shadowRoot.querySelector('[data-pane="costs"] .editor');
  const combos=editor.querySelectorAll('input[list]');

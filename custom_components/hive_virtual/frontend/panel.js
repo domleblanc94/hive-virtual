@@ -1,5 +1,5 @@
 import {activityChart, temperatureChart} from './charts.js';
-import {scheduleEditor, costEditor} from './editors.js';
+import {byStartTime, scheduleEditor, costEditor} from './editors.js';
 
 class HiveVirtualPanel extends HTMLElement {
   constructor() {
@@ -182,7 +182,7 @@ class HiveVirtualPanel extends HTMLElement {
       this._drawTarget(card, input);
       card.querySelector('.schedule').textContent=s.attributes.schedule_entity ? `Schedule helper: ${s.attributes.schedule_entity}` : 'Using built-in weekly schedule';
       const periods=card.querySelector('.periods');periods.replaceChildren();
-      for(const p of s.attributes.schedule_entity ? [] : (s.attributes.schedule || [])) {
+      for(const p of s.attributes.schedule_entity ? [] : [...(s.attributes.schedule || [])].sort(byStartTime)) {
         const row=document.createElement('p');row.textContent=`${p.time} · ${p.temperature} °C · ${p.area} · ${(p.days||[]).map(d=>['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d]).join(', ')}`;periods.append(row);
       }
       this._metrics(card,s);

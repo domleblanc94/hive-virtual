@@ -1,4 +1,5 @@
 export const DAYS=['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+export function byStartTime(a, b) { return a.time.localeCompare(b.time); }
 function node(tag,text){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;}
 function input(type,value){const e=node('input');e.type=type;e.value=value;return e;}
 function choice(values,value){const e=node('select');for(const v of values){const o=node('option',typeof v==='string'?v:v.label);o.value=typeof v==='string'?v:v.value;e.append(o);}e.value=value;return e;}
@@ -75,22 +76,25 @@ export async function scheduleEditor(panel,host,state,collapse){
     const record={row,time,end,temp,area,checks,extra:old.extra||{}};forms.push(record);
     row.append(button('Remove',()=>{row.remove();forms.splice(forms.indexOf(record),1);}));list.append(row);
   }
-  for(const r of original?nativeRows(original):config.schedule)addRow(r);
+  const periods = original ? nativeRows(original) : config.schedule;
+  for (const period of [...periods].sort(byStartTime)) addRow(period);
   host.append(button('Add period',()=>addRow()));
   const status=node('p');status.setAttribute('role','status');
   const save=button('Save schedule',async()=>{
     save.disabled=true;
     try{
-      const rows=forms.map(f=>{
+      const entries=forms.map(f=>{
         if(!f.time.reportValidity()||!f.temp.reportValidity()||(original&&!f.end.reportValidity()))throw Error('Check each time and temperature.');
         const days=f.checks.flatMap((c,i)=>c.checked?[i]:[]);if(!days.length)throw Error('Select at least one day for each period.');
-        return{time:f.time.value,end:f.end.value,temperature:Number(f.temp.value),area:f.area.value,days,extra:f.extra};
-      });
+        return {form: f, period: {time:f.time.value,end:f.end.value,temperature:Number(f.temp.value),area:f.area.value,days,extra:f.extra}};
+      }).sort((a, b) => byStartTime(a.period, b.period));
+      const rows = entries.map(entry => entry.period);
       if(original){
         const current=(await hass.callWS({type:'schedule/list'})).find(i=>i.id===original.id);
         if(JSON.stringify(current)!==JSON.stringify(original))throw Error('Schedule changed elsewhere. Close and reopen the editor.');
         await hass.callWS(nativePayload(rows,original));
       }else await hass.callWS({type:'hive_virtual/save',entity_id:state.entity_id,revision:config.revision,schedule:rows.map(({end,extra,...r})=>r)});
+      for (const {form} of entries) if (form.row.parentNode === list) list.append(form.row);
       status.textContent='Schedule saved. Your current heating mode is retained.';host.dataset.saved='true';save.disabled=true;
     }catch(e){status.textContent=e.message||String(e);save.disabled=false;}
   });host.append(save,button('Close editor',collapse),status);
