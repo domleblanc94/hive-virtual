@@ -10,6 +10,24 @@ spec.loader.exec_module(model)
 
 
 class EstimateTests(unittest.TestCase):
+    def test_gas_source_change_keeps_heating_but_clears_learned_rates(self):
+        old = model.DelayedGasLearning(("climate.hive", "sensor.volume", 11))
+        old.buckets = {"100": [1800, 900]}
+        old.days = {"180000": 15}
+        new = model.DelayedGasLearning(("climate.hive", "sensor.energy", 0), old.saved())
+        self.assertEqual(new.buckets, old.buckets)
+        self.assertEqual(new.days, {})
+        other = model.DelayedGasLearning(("climate.other", "sensor.energy", 0), old.saved())
+        self.assertEqual(other.buckets, {})
+
+    def test_historical_intervals_merge_without_double_counting(self):
+        learner = model.DelayedGasLearning(("climate.hive", "sensor.gas", 0))
+        learner.buckets = {"0": [900, 900]}
+        intervals = [(0, 1800, True), (1800, 3600, False)]
+        learner.import_intervals(intervals)
+        learner.import_intervals(intervals)
+        self.assertEqual(learner.buckets, {"0": [1800, 1800], "1": [1800, 0]})
+
     def test_delayed_gas_uses_exact_window_and_one_sample_per_day(self):
         source = ("climate.hive", "sensor.edf", 0)
         learning = model.DelayedGasLearning(source)

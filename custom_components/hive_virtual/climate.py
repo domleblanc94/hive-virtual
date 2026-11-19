@@ -180,6 +180,9 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self._gas_learning = GasLearning(self._gas_source())
         self._delayed_gas = DelayedGasLearning(self._delayed_source())
         self._reported_gas = None
+        self._backfill_at = None
+        self._backfill_task = None
+        self._backfill_status = "waiting"
 
     def _sensor_state_fault(self, state):
         if state is None or state.state in ("unknown", "unavailable"):
@@ -345,9 +348,10 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             if self._gas_learning.source != self._gas_source() or was_learning != self.config["cost"]["learn_from_gas_meter"]:
                 self._gas_learning = GasLearning(self._gas_source(), self._gas_learning.saved())
             if self._delayed_gas.source != self._delayed_source():
-                self._delayed_gas = DelayedGasLearning(self._delayed_source())
+                self._delayed_gas = DelayedGasLearning(self._delayed_source(), self._delayed_gas.saved())
                 self._reported_gas = None
                 self._gas_learning = GasLearning(self._gas_source(), self._gas_learning.saved())
+                self._backfill_at = None
             self._watch()
         await self._reconcile()
 
@@ -576,6 +580,50 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             for listener in list(self._listeners):
                 listener()
             self._notify()
+            self._schedule_backfill()
+
+    def _schedule_backfill(self):
+        source = self._delayed_gas.source
+        if (self._removed or not source or not self.config["cost"].get("learn_from_gas_meter")
+                or self._backfill_task and not self._backfill_task.done()):
+            return
+        if "recorder" not in getattr(self.hass.config, "components", set()):
+            self._backfill_status = "recorder_unavailable"
+            return
+        now = dt_util.utcnow()
+        if self._backfill_at and now - self._backfill_at < timedelta(hours=6):
+            return
+        from homeassistant.helpers import entity_registry
+        registry = entity_registry.async_get(self.hass)
+        activity = registry.async_get_entity_id("binary_sensor", "hive_virtual", self._attr_unique_id + "_reported_heating")
+        if not activity:
+            self._backfill_status = "activity_unavailable"
+            return
+        self._backfill_at = now
+        self._backfill_status = "loading"
+        self._backfill_task = self.hass.async_create_task(self._backfill(source, activity))
+        self._tasks.add(self._backfill_task)
+        self._backfill_task.add_done_callback(self._tasks.discard)
+
+    async def _backfill(self, source, activity):
+        try:
+            from .history_learning import async_read_learning_history
+            _, entity, factor = source
+            intervals, totals = await async_read_learning_history(self.hass, activity, entity, factor)
+            async with self._lock:
+                if self._removed or source != self._delayed_gas.source:
+                    return
+                self._delayed_gas.import_intervals(intervals)
+                for (start, end), energy in sorted(totals.items()):
+                    self._delayed_gas.match(start, end, energy, dt_util.utcnow().timestamp())
+                self._backfill_status = "complete" if intervals else "no_activity_history"
+                await self._persist(force=True)
+            await self._reconcile()
+        except Exception:
+            self._backfill_status = "failed"
+            _LOGGER.exception("Unable to rebuild gas learning from recorded history")
+            if not self._removed:
+                self.async_write_ha_state()
 
     def _record_history(self, on):
         day = self._runtime.day
@@ -737,6 +785,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 "gas_learning_status": self._delayed_gas.status,
                 "gas_learning_coverage": self._delayed_gas.coverage,
                 "gas_learning_heating_hours": self._delayed_gas.heating_hours,
+                "gas_learning_history_status": self._backfill_status,
                 "retry_after": self._pending_until.isoformat() if self._pending_until else None}
 
     async def async_set_temperature(self, **kwargs):

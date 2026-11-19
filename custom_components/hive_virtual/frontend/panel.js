@@ -274,6 +274,15 @@ class HiveVirtualPanel extends HTMLElement {
       };
       const reason = reasons[s.attributes.gas_learning_status];
       if (reason) card.querySelector('.learning-basis').textContent += ` ${reason}`;
+      const history = {
+        loading: 'Checking recorded heating and gas history.',
+        complete: 'Recorded history checked for matching days.',
+        no_activity_history: 'No usable recorded heating history was found.',
+        recorder_unavailable: 'Enable Recorder to recover earlier heating history.',
+        activity_unavailable: 'The recorded heating entity is not available yet.',
+        failed: 'Recorded history could not be read. Check the Home Assistant logs.',
+      }[s.attributes.gas_learning_history_status];
+      if (history) card.querySelector('.learning-basis').textContent += ` ${history}`;
     }
     const missing=configured=>configured?'Unavailable':'Not configured';
     const money=(v,configured)=>{if(v===null||v===undefined)return missing(configured);try{return new Intl.NumberFormat(undefined,{style:'currency',currency}).format(v);}catch{return `${v.toFixed(2)} ${currency}`;}};

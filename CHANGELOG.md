@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.11
+
+- Preserve heating observations when changing the delayed gas meter or conversion factor for the same Hive zone.
+- Recover up to eight days of recorded heating activity and dated gas totals at startup and every six hours. Unavailable periods and interrupted Recorder sessions are excluded.
+
 ## 0.6.10
 
 - Show delayed gas learning rejection reasons, observed coverage and heating hours.

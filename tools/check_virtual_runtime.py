@@ -17,7 +17,8 @@ async def main():
     hass = HomeAssistant('/config')
     loader.async_setup(hass)
     try:
-        assert await bootstrap.async_from_config_dict({'frontend': {}, 'hive_virtual': {}}, hass)
+        assert await bootstrap.async_from_config_dict({'frontend': {}, 'hive_virtual': {},
+            'recorder': {'db_url': 'sqlite:////config/history-test.db'}}, hass)
         hass.states.async_set('climate.hive_trial', 'heat', {'temperature': 7, 'temperature_unit': '°C', 'preset_mode': 'none', 'preset_modes': ['none', 'boost'], 'min_temp': 5, 'max_temp': 32})
         hass.states.async_set('sensor.down_trial', '18', {'unit_of_measurement': '°C', 'device_class': 'temperature'})
         hass.states.async_set('sensor.up_trial', '19', {'unit_of_measurement': '°C', 'device_class': 'temperature'})
@@ -196,6 +197,25 @@ async def main():
         assert controller.extra_state_attributes['reported_gas']['kwh'] == 34.954
         assert controller.extra_state_attributes['gas_learning_days'] == 0
         assert await hass.config_entries.async_unload(entry.entry_id)
+        # Exercise the real Recorder query and its dated sensor attributes.
+        await hass.async_start()
+        hass.states.async_set('binary_sensor.history_trial', 'on')
+        hass.states.async_set('sensor.delayed_history_trial', '34.954', {'unit_of_measurement': 'kWh', 'charges': charges})
+        await hass.async_block_till_done()
+        from homeassistant.components.recorder import get_instance
+        await get_instance(hass).async_block_till_done()
+        from custom_components.hive_virtual.history_learning import async_read_learning_history, heating_intervals
+        intervals, totals = await async_read_learning_history(hass, 'binary_sensor.history_trial', 'sensor.delayed_history_trial', 0)
+        assert totals and next(iter(totals.values())) == 34.954
+        assert intervals
+        moment = datetime.now(timezone.utc)
+        states = [SimpleNamespace(state='on', last_updated=moment),
+                  SimpleNamespace(state='unavailable', last_updated=moment + timedelta(seconds=60)),
+                  SimpleNamespace(state='off', last_updated=moment + timedelta(seconds=90))]
+        timestamp = moment.timestamp()
+        assert heating_intervals(states, [(timestamp, timestamp + 120)], timestamp, timestamp + 120) == [
+            (timestamp, timestamp + 60, True), (timestamp + 90, timestamp + 120, False)]
+        print(json.dumps({'recorder_history_backfill': True, 'dated_gas_attributes': True, 'unavailable_gaps': True}))
     finally:
         await hass.async_stop()
 

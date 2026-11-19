@@ -149,15 +149,31 @@ class DelayedGasLearning:
     """Match supplier windows to observed heating, keyed by time of consumption."""
 
     def __init__(self, source=None, saved=None):
-        saved = saved if isinstance(saved, dict) and source and saved.get("source") == list(source) else {}
+        saved = saved if isinstance(saved, dict) else {}
+        old_source = saved.get("source")
+        same_zone = source and isinstance(old_source, list) and old_source and old_source[0] == source[0]
         self.source = source
-        self.buckets = saved.get("buckets", {})
-        self.days = saved.get("days", {})
+        self.buckets = saved.get("buckets", {}).copy() if same_zone else {}
+        self.days = saved.get("days", {}).copy() if source and old_source == list(source) else {}
         self.status = "waiting_for_dated_reading"
         self.coverage = None
         self.heating_hours = None
         self.last = None
         self.on = None
+
+    def import_intervals(self, intervals):
+        """Merge reconstructed intervals without counting live observations twice."""
+        buckets = {}
+        for start, end, on in intervals:
+            while start < end:
+                bucket = int(start // 1800)
+                until = min(end, (bucket + 1) * 1800)
+                covered, heated = buckets.get(str(bucket), (0, 0))
+                buckets[str(bucket)] = [covered + until - start, heated + (until - start if on else 0)]
+                start = until
+        for key, value in buckets.items():
+            if value[0] > self.buckets.get(key, (0, 0))[0]:
+                self.buckets[key] = value
 
     def update(self, now, on):
         cutoff = int(now // 1800) - 48 * 8

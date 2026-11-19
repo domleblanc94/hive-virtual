@@ -57,6 +57,8 @@ In **Delayed daily gas usage**, select a daily total sensor with a `charges` att
 
 **Boiler reference presets** fill in an editable manual estimate from the midpoint of a published central-heating input range. This is a starting assumption. Actual gas input varies with boiler modulation and the installation.
 
+Changing the delayed gas sensor preserves heating observations for the same Hive zone and clears the learned gas rates. When Recorder is available, learning also reads the last eight days of the integration’s Reported heating entity and the selected gas sensor’s dated readings. It checks at startup, after a source change and every six hours. Recorder must have retained the sensor attributes. Missing activity, unavailable periods and incorrectly closed Recorder sessions are excluded. The Gas & costs page shows the history recovery status.
+
 Whole-house gas cost is either the selected daily cost sensor, exactly as reported, or daily energy × current rate. It can include hot water/cooking. A daily cost sensor may already include standing charges, so the standing charge is always shown separately and is never automatically added. The heating-only estimate and household spend must not be added together.
 
 Heating hours use only observed, fresh Hive heating reports. Unknown gaps and intervals longer than two minutes are omitted. Daily counters reset at Home Assistant's local midnight, persist across restarts, and can lose up to five minutes on an abrupt host failure. They are approximate monitoring data, not billing or certified metering. Money/daily-estimate sensors are recorded for history but are not advertised as Energy Dashboard cumulative meters.

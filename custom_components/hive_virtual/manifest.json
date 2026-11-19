@@ -6,6 +6,7 @@
     "http",
     "panel_custom",
     "persistent_notification",
+    "recorder",
     "websocket_api"
   ],
   "codeowners": [
@@ -19,5 +20,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/domleblanc94/hive-virtual/issues",
   "requirements": [],
-  "version": "0.6.10"
+  "version": "0.6.11"
 }
