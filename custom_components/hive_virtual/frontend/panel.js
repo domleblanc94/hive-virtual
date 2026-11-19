@@ -1,4 +1,4 @@
-import {activityChart, temperatureChart} from './charts.js';
+import {activityChart, temperatureChart, usageBuckets, usageChart} from './charts.js';
 import {byStartTime, scheduleEditor, costEditor} from './editors.js';
 
 class HiveVirtualPanel extends HTMLElement {
@@ -80,9 +80,13 @@ class HiveVirtualPanel extends HTMLElement {
             <div class="periods"></div><div class="editor" hidden></div>
             <a href="/config/integrations/integration/hive_virtual">Integration settings and schedule source</a>
           </section>
-          <section data-pane="history" hidden><h3>Heating and house temperatures</h3>
-            <label>History <select class="range"><option value="24">24 hours</option><option value="48">48 hours</option><option value="168">7 days</option></select></label>
-            <button class="refresh">Refresh graphs</button><p class="history-error"></p><div class="activity chart"></div>
+          <section data-pane="history" hidden><h3>Usage and costs</h3>
+            <label>Period <select class="range"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
+            <button class="refresh">Refresh graphs</button>
+            <small>Daily totals for Day, Week and Month. Year groups recorded days into months. Totals build up after updating. Missing readings leave gaps, and today is still in progress.</small>
+            <div class="usage-charts"></div>
+            <h3>Heating and house temperatures</h3>
+            <p class="detail-range"></p><p class="history-error"></p><div class="activity chart"></div>
             <small>Amber is heating reported on, pale teal is off, and grey is unavailable or missing history. Hover to see interval times.</small>
             <div class="temperatures chart"></div>
             <h3>Hive fallback history</h3><div class="fallback-history chart"></div>
@@ -256,6 +260,21 @@ class HiveVirtualPanel extends HTMLElement {
       !learning ? '' : learned != null ?
       'Heating cost uses the learned median gas input. Hot water and cooking can affect it.' :
       `Learning needs three completed runs with at least three minutes between in-run meter changes. ${source.boiler_input_kw > 0 ? 'Using your manual kW for now.' : 'Heating cost will appear once a rate is learned and a tariff is available.'}`;
+    if (delayed && learning) {
+      const reasons = {
+        sensor_unavailable: 'The delayed gas sensor is unavailable or has not loaded.',
+        missing_period: 'The sensor needs a complete day of dated half-hour readings in its charges attribute.',
+        invalid_energy: 'The gas total or unit could not be read. Volume readings need a conversion factor.',
+        reading_outside_retention: 'The consumption period is in the future or older than the eight days of retained heating observations.',
+        insufficient_coverage: `Only ${s.attributes.gas_learning_coverage ?? 0}% of this gas period has usable Hive activity. At least 95% is required.`,
+        insufficient_heating: `This period has ${s.attributes.gas_learning_heating_hours ?? 0} heating hours. At least one hour is required.`,
+        collecting_days: `${samples ?? 0} qualifying days recorded. Three are required.`,
+        ready: 'The learned rate is available and is used for the heating cost estimate.',
+        implausible_estimate: 'The matched gas and heating hours produced an unusable input estimate.',
+      };
+      const reason = reasons[s.attributes.gas_learning_status];
+      if (reason) card.querySelector('.learning-basis').textContent += ` ${reason}`;
+    }
     const missing=configured=>configured?'Unavailable':'Not configured';
     const money=(v,configured)=>{if(v===null||v===undefined)return missing(configured);try{return new Intl.NumberFormat(undefined,{style:'currency',currency}).format(v);}catch{return `${v.toFixed(2)} ${currency}`;}};
     for(const[label,value]of [['Reported heating hours',`${Number(s.attributes.daily_heating_hours||0).toFixed(2)} h`],[delayed && learning && learned != null ? 'Estimated heating cost (daily gas proxy)' : 'Estimated heating-only cost',money(values.heating_cost,(source.boiler_input_kw>0||learning)&&source.unit_rate_entity)],...metrics,['Whole-house gas usage',values.household_gas_kwh==null?missing(source.gas_energy_today_entity):`${values.household_gas_kwh.toFixed(2)} kWh`],['Whole-house gas cost',money(values.household_variable_cost,source.gas_cost_today_entity||(source.gas_energy_today_entity&&source.unit_rate_entity))],['Standing charge (separate)',money(values.standing_charge,source.standing_charge_entity)]]){
@@ -263,17 +282,45 @@ class HiveVirtualPanel extends HTMLElement {
     }
     card.querySelector('.cost-basis').textContent=s.attributes.cost_sources?.gas_cost_today_entity?'Household cost is the selected daily cost sensor, as reported; it may already include standing charges.':'Household cost is daily gas usage × the current unit rate, excluding standing charges. Changing tariffs reprice estimates; these are not a bill.';
   }
+  _usageHistory(card, state, linked, range) {
+    const {history_today: today, currency, cost_sources: sources} = state.attributes;
+    const totals = linked.find(entity => entity.attributes.heating_role === 'history_totals');
+    const days = {...totals?.attributes.days};
+    if (today?.date) days[today.date] = {...days[today.date], ...today};
+    const date = today?.date || this._hass.states[state.entity_id]?.attributes.history_date;
+    const charts = card.querySelector('.usage-charts');
+    charts.replaceChildren();
+    const metrics = [
+      ['heating_hours', 'Reported heating hours', 'h'],
+      ['heating_kwh', 'Estimated heating gas', 'kWh'],
+      ['heating_cost', 'Estimated heating cost', currency || ''],
+    ];
+    if (sources?.gas_reported_entity || Object.values(days).some(day => day.reported_kwh != null)) {
+      metrics.push(['reported_kwh', 'Reported whole-house gas', 'kWh']);
+    }
+    for (const [key, title, unit] of metrics) {
+      const heading = document.createElement('h4');
+      heading.textContent = unit ? `${title} (${unit})` : title;
+      const chart = document.createElement('div');
+      chart.className = 'chart';
+      chart.append(usageChart(usageBuckets(days, date, range, key, currency), title, unit));
+      charts.append(heading, chart);
+    }
+  }
   async _history(card,state,force=false){
     if(card._historyLoading){if(force)card._historyQueued=true;return;}
     if(!force&&Date.now()-(card._historyAt||0)<60000)return;
     card._historyLoading=true;card._historyAt=Date.now();
     try{
       const linked=Object.values(this._hass.states).filter(e=>e.attributes.controller_unique_id===state.attributes.controller_unique_id);
+      const range = card.querySelector('.range').value;
+      this._usageHistory(card, this._hass.states[state.entity_id] || state, linked, range);
+      card.querySelector('.detail-range').textContent = range === 'day' ? 'Detailed timelines · Last 24 hours' : 'Detailed timelines · Last 7 days';
       const activity=linked.find(e=>e.attributes.heating_role==='activity');
       const fallback=linked.find(e=>e.attributes.heating_role==='sensor_fallback');
       const temperatures=linked.filter(e=>['area_temperature','target_temperature'].includes(e.attributes.heating_role));
       if(!activity&&!fallback&&!temperatures.length)throw Error('History sensors are starting. Restart after updating and allow readings to be recorded.');
-      const end=Date.now(),start=end-Number(card.querySelector('.range').value)*3600000,ids=[activity,fallback,...temperatures].filter(Boolean).map(e=>e.entity_id);
+      const end=Date.now(),start=end-(range === 'day' ? 24 : 168)*3600000,ids=[activity,fallback,...temperatures].filter(Boolean).map(e=>e.entity_id);
       const response=await this._hass.callApi('GET',`history/period/${new Date(start).toISOString()}?end_time=${new Date(end).toISOString()}&filter_entity_id=${encodeURIComponent(ids.join(','))}&minimal_response`);
       const groups=new Map(response.filter(a=>a.length).map(a=>[a[0].entity_id,a]));
       const activityStates=activity?groups.get(activity.entity_id)||[]:[];

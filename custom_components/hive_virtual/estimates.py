@@ -153,6 +153,9 @@ class DelayedGasLearning:
         self.source = source
         self.buckets = saved.get("buckets", {})
         self.days = saved.get("days", {})
+        self.status = "waiting_for_dated_reading"
+        self.coverage = None
+        self.heating_hours = None
         self.last = None
         self.on = None
 
@@ -173,18 +176,27 @@ class DelayedGasLearning:
     def match(self, start, end, kwh, now):
         cutoff = int(now // 1800) - 48 * 8
         if end > now or start // 1800 < cutoff:
+            self.status = "reading_outside_retention"
             return
         observations = [self.buckets.get(str(bucket), (0, 0)) for bucket in range(start // 1800, end // 1800)]
         covered = sum(value[0] for value in observations)
         heated = sum(value[1] for value in observations)
-        if covered < .95 * (end - start) or heated < 3600:
+        self.coverage = round(100 * covered / (end - start), 1)
+        self.heating_hours = round(heated / 3600, 2)
+        if covered < .95 * (end - start):
+            self.status = "insufficient_coverage"
+            return
+        if heated < 3600:
+            self.status = "insufficient_heating"
             return
         key = str(start)
         kw = kwh * 3600 / heated
         if 0 < kw <= 100:
             self.days[key] = kw
+            self.status = "ready" if len(self.days) >= 3 else "collecting_days"
         else:
             self.days.pop(key, None)
+            self.status = "implausible_estimate"
         self.days = dict(sorted(self.days.items(), key=lambda item: int(item[0]))[-12:])
 
     @property

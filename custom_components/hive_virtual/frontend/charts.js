@@ -17,6 +17,61 @@ function svgNode(tag,attrs={},text) {
   const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);
   if(text!==undefined)n.textContent=text;return n;
 }
+
+export function usageBuckets(days, today, range, metric, currency) {
+  const end = new Date(`${today}T00:00:00Z`);
+  if (!Number.isFinite(end.getTime())) return [];
+  const count = {day: 1, week: 7, month: 30, year: 12}[range];
+  const monthly = range === 'year';
+  const buckets = Array.from({length:count}, (_, index) => {
+    const date = new Date(end);
+    if (monthly) {
+      date.setUTCDate(1);
+      date.setUTCMonth(date.getUTCMonth() - count + 1 + index);
+    } else {
+      date.setUTCDate(date.getUTCDate() - count + 1 + index);
+    }
+    return {date: date.toISOString().slice(0, monthly ? 7 : 10), value: null, days: 0};
+  });
+  const byDate = new Map(buckets.map(bucket => [bucket.date, bucket]));
+  for (const [date, row] of Object.entries(days)) {
+    if (date > today || !Number.isFinite(row[metric]) || (metric === 'heating_cost' && row.currency !== currency)) continue;
+    const bucket = byDate.get(monthly ? date.slice(0,7) : date);
+    if (!bucket) continue;
+    bucket.value = (bucket.value ?? 0) + row[metric];
+    bucket.days++;
+  }
+  return buckets;
+}
+
+export function usageChart(buckets, title, unit) {
+  if (!buckets.some(bucket => bucket.value !== null)) {
+    const message = document.createElement('p');
+    message.textContent = 'No readings recorded for this period.';
+    return message;
+  }
+  const svg = svgNode('svg', {viewBox:'0 0 760 180',role:'img','aria-label':title});
+  const peak = Math.max(1, ...buckets.map(bucket => bucket.value ?? 0));
+  const width = 700 / buckets.length;
+  const stride = buckets.length > 12 ? 5 : 1;
+  svg.append(svgNode('path', {d:'M 45 20 V 140 H 745',fill:'none',stroke:'currentColor',opacity:.35}));
+  svg.append(svgNode('text', {x:40,y:22,fill:'currentColor','text-anchor':'end','font-size':13}, peak.toFixed(1)));
+  svg.append(svgNode('text', {x:40,y:142,fill:'currentColor','text-anchor':'end','font-size':13}, '0'));
+  buckets.forEach(({date,value,days},index) => {
+    const center = 45 + (index + .5) * width;
+    if (value !== null) {
+      const height = Math.max(2, 120 * value / peak);
+      const barWidth = Math.min(55, width * .72);
+      const bar = svgNode('rect', {x:center-barWidth/2,y:140-height,width:barWidth,height,rx:2,fill:'#008b91',tabindex:0});
+      bar.append(svgNode('title', {}, `${date} · ${value.toFixed(2)} ${unit}${date.length === 7 ? ` · ${days} recorded days` : ''}`));
+      svg.append(bar);
+      if (buckets.length <= 7) svg.append(svgNode('text', {x:center,y:Math.max(14,135-height),fill:'currentColor','text-anchor':'middle','font-size':13},value.toFixed(2)));
+    }
+    if (index % stride === 0) svg.append(svgNode('text',{x:center,y:163,fill:'currentColor','text-anchor':'middle','font-size':13},
+      date.length === 7 ? date.slice(2) : date.slice(5)));
+  });
+  return svg;
+}
 export function activityChart(states,start,end,ariaLabel='Reported heating on, off and unavailable timeline',styles={
   on:['#df8800','On'],off:['#cce4e5','Off'],
 }) {

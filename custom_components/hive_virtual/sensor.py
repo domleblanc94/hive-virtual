@@ -7,7 +7,34 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [HeatingSensor(controller, "area_temperature", area) for area in controller.config["areas"]]
     entities += [HeatingSensor(controller, kind) for kind in (
         "target_temperature", "heating_hours", "heating_kwh", "heating_cost", "household_gas_kwh", "household_variable_cost", "sensor_fallback")]
-    async_add_entities(entities)
+    async_add_entities([*entities, HeatingHistory(controller)])
+
+
+class HeatingHistory(SensorEntity):
+    _attr_name = "Heating history"
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _unrecorded_attributes = frozenset({"days"})
+
+    def __init__(self, controller):
+        self.controller = controller
+        self._attr_unique_id = controller._attr_unique_id + "_history_totals"
+
+    @property
+    def device_info(self):
+        return self.controller.device_info
+
+    @property
+    def native_value(self):
+        return len(self.controller.history_days)
+
+    @property
+    def extra_state_attributes(self):
+        return {"controller_unique_id": self.controller._attr_unique_id, "heating_role": "history_totals",
+                "days": self.controller.history_days}
+
+    async def async_added_to_hass(self):
+        self.async_on_remove(self.controller.subscribe(self.async_write_ha_state))
 
 
 class HeatingSensor(SensorEntity):

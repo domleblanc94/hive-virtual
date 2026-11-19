@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.10
+
+- Show delayed gas learning rejection reasons, observed coverage and heating hours.
+- Add daily usage and cost bar charts with Day, Week, Month and Year views. Summaries start collecting after this update and retain up to 370 dated entries.
+
+
 ## 0.6.4
 
 - Optionally learn gas input power from cumulative meter changes during reported heating runs. Show the learned kW and sample count, and use the learned rate for heating-only cost estimates.

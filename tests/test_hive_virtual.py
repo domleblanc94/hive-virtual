@@ -519,6 +519,21 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.call.assert_not_called()
         self.assertTrue(self.entity._storage_fault)
 
+    async def test_history_archives_daily_estimate_and_preserves_dated_gas(self):
+        await self.entity.async_added_to_hass()
+        self.entity._runtime.day = "2026-11-09"
+        self.entity._runtime.seconds = 7200
+        self.entity._record_history(True)
+        self.assertEqual(self.entity._history_today["heating_hours"], 2)
+        self.entity._runtime.day = "2026-11-10"
+        self.entity._reported_gas = {"date": "2026-11-09", "kwh": 15}
+        self.entity._record_history(None)
+        self.assertEqual(self.entity.history_days["2026-11-09"]["heating_hours"], 2)
+        self.assertEqual(self.entity.history_days["2026-11-09"]["reported_kwh"], 15)
+        self.assertEqual(self.entity._history_today, {})
+        self.assertTrue(await self.entity._persist())
+        self.assertEqual((await self.entity._store.async_load())["history_days"], self.entity.history_days)
+
     async def test_graceful_shutdown_can_flush_runtime_inside_save_interval(self):
         self.entity._store = MemoryStore(self.entity.hass, 1, "runtime_flush_test")
         await self.entity._persist()

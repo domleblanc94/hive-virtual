@@ -10,7 +10,11 @@ let native=false,revision='1';const saves=[],nativeSaves=[],serviceCalls=[];
 const helper={id:'demo_helper',name:'Demo heating',monday:[{from:'22:00:00',to:'24:00:00',data:{temperature:18,area:'Upstairs',extra:'preserved'}}]};
 const state={entity_id:'climate.demo_heating',state:'auto',attributes:{hive_virtual_controller:true,controller_unique_id:'demo',friendly_name:'House virtual heating',current_temperature:19.6,temperature:20,active_area:'Downstairs',control_status:'waiting_for_boost_expiry',schedule,daily_heating_hours:2.5,currency:'GBP',cost_estimates:{heating_cost:2.25,household_gas_kwh:36.4,household_variable_cost:2.73,standing_charge:.31}}};
 const linked=(id,role,area)=>({entity_id:id,state:'20',attributes:{controller_unique_id:'demo',heating_role:role,area}});
+state.attributes.history_today={date:'2026-11-10',heating_hours:2.5,heating_kwh:30,heating_cost:2.25,currency:'GBP'};
+const history=linked('sensor.demo_history','history_totals');
+history.attributes.days={'2026-11-09':{heating_hours:1,heating_kwh:12,heating_cost:.9,currency:'GBP',reported_kwh:18}};
 const hass={user:{is_admin:true},states:{[state.entity_id]:state,
+ [history.entity_id]:history,
  'binary_sensor.demo_activity':linked('binary_sensor.demo_activity','activity'),
  'sensor.demo_fallback':linked('sensor.demo_fallback','sensor_fallback'),
  'sensor.demo_down':linked('sensor.demo_down','area_temperature','Downstairs'),
@@ -54,6 +58,13 @@ try{
  button(panel.shadowRoot,'History').click();
  await pause();
  assert(!panel.shadowRoot.querySelector('[data-pane="history"]').hidden,'History tab did not open');
+ const range=panel.shadowRoot.querySelector('.range');
+ const usage=panel.shadowRoot.querySelector('.usage-charts');
+ assert(usage.querySelector('[aria-label="Estimated heating cost"]')?.textContent.includes('2.25'),'Day cost bar missing');
+ range.value='week';range.dispatchEvent(new Event('change'));await pause();
+ assert(usage.querySelector('[aria-label="Reported whole-house gas"]')?.textContent.includes('18.00'),'Week reported gas bar missing');
+ range.value='year';range.dispatchEvent(new Event('change'));await pause();
+ assert(usage.querySelector('[aria-label="Estimated heating cost"]')?.textContent.includes('3.15'),'Year cost total missing');
  assert(panel.shadowRoot.querySelector('.target').getBoundingClientRect().width>0,'Thermostat controls disappeared');
  const arc=panel.shadowRoot.querySelector('.dial-fill');
  const before=arc.getAttribute('stroke-dasharray');

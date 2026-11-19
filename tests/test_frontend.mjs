@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {intervals,points} from '../custom_components/hive_virtual/frontend/charts.js';
+import {intervals,points,usageBuckets} from '../custom_components/hive_virtual/frontend/charts.js';
 import {nativeRows,nativePayload} from '../custom_components/hive_virtual/frontend/editors.js';
+
+test('usage charts group daily totals by month and retain gaps', () => {
+ const days = {'2026-10-01':{heating_cost:2,currency:'GBP'},'2026-10-03':{heating_cost:1,currency:'GBP'},
+   '2026-11-01':{heating_cost:8,currency:'EUR'},'2026-11-09':{heating_cost:0,currency:'GBP'}};
+ const weekly = usageBuckets(days,'2026-11-10','week','heating_cost','GBP');
+ assert.deepEqual(weekly.slice(-2), [{date:'2026-11-09',value:0,days:1},{date:'2026-11-10',value:null,days:0}]);
+ const yearly = usageBuckets(days,'2026-11-10','year','heating_cost','GBP');
+ assert.equal(yearly.length,12);
+ assert.deepEqual(yearly.slice(-2), [{date:'2026-10',value:3,days:2},{date:'2026-11',value:0,days:1}]);
+});
 
 test('timeline retains unknown gaps and clips to the requested period',()=>{
  const states=[{state:'on',last_changed:new Date(500).toISOString()},{state:'off',last_changed:new Date(1500).toISOString()},{state:'unavailable',last_changed:new Date(1700).toISOString()}];

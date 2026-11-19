@@ -61,6 +61,8 @@ Whole-house gas cost is either the selected daily cost sensor, exactly as report
 
 Heating hours use only observed, fresh Hive heating reports. Unknown gaps and intervals longer than two minutes are omitted. Daily counters reset at Home Assistant's local midnight, persist across restarts, and can lose up to five minutes on an abrupt host failure. They are approximate monitoring data, not billing or certified metering. Money/daily-estimate sensors are recorded for history but are not advertised as Energy Dashboard cumulative meters.
 
+**Hive Heating → History** shows daily heating runtime, estimated gas and estimated cost, plus dated whole-house gas when configured. Choose Day, Week, Month (30 days), or Year (12 monthly bars). Daily summaries build up after installing this feature and are saved separately from the detailed timelines, which show up to seven days of Home Assistant history.
+
 The previous failed validation email concerned the initial missing HTTP dependency declaration; it was corrected before the first release. HACS, unit tests and Home Assistant packaging validation run on every push and release.
 
 A community Home Assistant integration that controls one Hive heating zone from upstairs/downstairs room temperatures. It uses your existing official Hive integration and does not require another Hive login. It is independent of the Hive EV project.

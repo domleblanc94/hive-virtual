@@ -170,6 +170,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         self._tasks = set()
         self._was_boosting = False
         self._runtime = DailyRuntime()
+        self.history_days = {}
+        self._history_today = {}
         self.config.setdefault("notifications", True)
         self.config.setdefault("cooldown_minutes", 2)
         self.config.setdefault("sensor_report_entities", {})
@@ -246,9 +248,12 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             self._delayed_gas.update(timestamp, heating)
             meter = self.hass.states.get(entity)
             self._reported_gas = None
+            self._delayed_gas.coverage = self._delayed_gas.heating_hours = None
+            self._delayed_gas.status = "sensor_unavailable"
             if meter:
                 period = reported_gas_period(meter.attributes.get("charges"))
                 energy = energy_kwh(meter.state, meter.attributes.get("unit_of_measurement"), factor)
+                self._delayed_gas.status = "missing_period" if not period else "invalid_energy"
                 if period and energy is not None and period[1] <= timestamp:
                     start, end = period
                     self._reported_gas = {"date": datetime.fromtimestamp(start, dt_util.now().tzinfo).date().isoformat(), "kwh": energy}
@@ -289,6 +294,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 "hvac_mode": self.hvac_mode,
                 "target_temperature": self.target_temperature,
                 "runtime": self._runtime.saved(),
+                "history_days": self.history_days,
+                "history_today": self._history_today,
                 "gas_learning": self._gas_learning.saved(),
                 "delayed_gas": self._delayed_gas.saved(),
                 "pending_until": self._pending_until.isoformat() if self._pending_until else None,
@@ -305,7 +312,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         # Save mode changes and other important transitions immediately.
         # Throttle routine temperature and runtime snapshots.
         if not force and self._saved and self._last_saved_at and (dt_util.utcnow() - self._last_saved_at).total_seconds() < 300:
-            immediate = ("fault", "pending_until", "gas_learning", "hvac_mode", "target_temperature")
+            immediate = ("fault", "pending_until", "gas_learning", "hvac_mode", "target_temperature", "history_days")
             if all(data[key] == self._saved.get(key) for key in immediate):
                 return True
         try:
@@ -366,6 +373,8 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
         try:
             saved = await self._store.async_load() or {}
             self._runtime = DailyRuntime(saved.get("runtime"))
+            self.history_days = saved.get("history_days", {})
+            self._history_today = saved.get("history_today", {})
             self._gas_learning = GasLearning(self._gas_source(), saved.get("gas_learning"))
             self._delayed_gas = DelayedGasLearning(self._delayed_source(), saved.get("delayed_gas"))
             self._latched_fault = saved.get("fault")
@@ -546,6 +555,7 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             self._runtime.update(now.timestamp(), local.date().isoformat(),
                                  local.hour * 3600 + local.minute * 60 + local.second, on)
             self._learn_gas(now.timestamp(), on)
+            self._record_history(on)
             if hive is None or hive.state in ("unknown", "unavailable"):
                 self._status = "hive_unavailable"
             elif self._boosting():
@@ -566,6 +576,28 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
             for listener in list(self._listeners):
                 listener()
             self._notify()
+
+    def _record_history(self, on):
+        day = self._runtime.day
+        previous = self._history_today.get("date")
+        if previous and previous != day:
+            self.history_days = {**self.history_days, previous: {
+                **self.history_days.get(previous, {}), **self._history_today}}
+            self._history_today = {}
+        if on is not None:
+            estimates = self.cost_estimates()
+            self._history_today = {
+                "date": day, "heating_hours": round(self._runtime.seconds / 3600, 4),
+                "heating_kwh": estimates["heating_kwh"], "heating_cost": estimates["heating_cost"],
+                "currency": self.config["cost"]["currency"],
+            }
+        if self._reported_gas:
+            date = self._reported_gas["date"]
+            row = self.history_days.get(date, {})
+            if row.get("reported_kwh") != self._reported_gas["kwh"]:
+                self.history_days = {**self.history_days, date: {**row, "reported_kwh": self._reported_gas["kwh"]}}
+        if len(self.history_days) > 370:
+            self.history_days = dict(sorted(self.history_days.items())[-370:])
 
     def _notify(self):
         if not self._store:
@@ -695,11 +727,16 @@ class HiveVirtual(ClimateEntity, RestoreEntity):
                 "cooldown_minutes": self.config["cooldown_minutes"],
                 "temperature_areas": list(self.config["areas"]),
                 "daily_heating_hours": round(self._runtime.seconds / 3600, 4),
+                "history_today": self._history_today,
+                "history_date": self._runtime.day,
                 "cost_estimates": self.cost_estimates(), "currency": self.config["cost"]["currency"],
                 "cost_sources": self.config["cost"],
                 "learned_gas_kw": self._gas_learning.kw, "gas_learning_runs": len(self._gas_learning.runs),
                 "reported_gas": self._reported_gas, "delayed_gas_kw": self._delayed_gas.kw,
                 "gas_learning_days": len(self._delayed_gas.days),
+                "gas_learning_status": self._delayed_gas.status,
+                "gas_learning_coverage": self._delayed_gas.coverage,
+                "gas_learning_heating_hours": self._delayed_gas.heating_hours,
                 "retry_after": self._pending_until.isoformat() if self._pending_until else None}
 
     async def async_set_temperature(self, **kwargs):
