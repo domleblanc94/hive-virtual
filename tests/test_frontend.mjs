@@ -1,7 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {intervals,points,usageBuckets} from '../custom_components/hive_virtual/frontend/charts.js';
 import {nativeRows,nativePayload} from '../custom_components/hive_virtual/frontend/editors.js';
+
+test('sidebar and its imports use the release version to invalidate browser caches', async () => {
+ const root = new URL('../custom_components/hive_virtual/', import.meta.url);
+ const {version} = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
+ const registration = await readFile(new URL('panel.py', root), 'utf8');
+ assert.ok(registration.includes(`panel.js?v=${version}`));
+ const panel = await readFile(new URL('frontend/panel.js', root), 'utf8');
+ const imports = [...panel.matchAll(/from ['"]\.\/([^'"]+)['"]/g)];
+ assert.ok(imports.length >= 2);
+ for (const [, path] of imports) assert.ok(path.endsWith(`?v=${version}`), `Unversioned dependency: ${path}`);
+});
 
 test('usage charts group daily totals by month and retain gaps', () => {
  const days = {'2026-10-01':{heating_cost:2,currency:'GBP'},'2026-10-03':{heating_cost:1,currency:'GBP'},

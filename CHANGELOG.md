@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.12
+
+- Version the chart and editor imports alongside the sidebar module so browser caches cannot mix files from different releases and leave Hive Heating blank after an update.
+
 ## 0.6.11
 
 - Preserve heating observations when changing the delayed gas meter or conversion factor for the same Hive zone.

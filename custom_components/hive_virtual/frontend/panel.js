@@ -1,5 +1,5 @@
-import {activityChart, temperatureChart, usageBuckets, usageChart} from './charts.js';
-import {byStartTime, scheduleEditor, costEditor} from './editors.js';
+import {activityChart, temperatureChart, usageBuckets, usageChart} from './charts.js?v=0.6.12';
+import {byStartTime, scheduleEditor, costEditor} from './editors.js?v=0.6.12';
 
 class HiveVirtualPanel extends HTMLElement {
   constructor() {
